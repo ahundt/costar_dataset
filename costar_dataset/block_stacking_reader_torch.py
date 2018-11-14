@@ -1,4 +1,7 @@
-
+'''Dataset loader for PyTorch.
+Originally written for Tensorflow by Andrew Hundt (ahundt) in jhu-lcsr/costar_plan (https://github.com/jhu-lcsr/costar_plan)
+Ported to PyTorch by Chia-Hung Lin (rexxarchl)
+'''
 import h5py
 import os
 import io
@@ -18,6 +21,8 @@ import tensorflow as tf
 import hypertree_pose_metrics
 import keras_applications
 import keras_preprocessing
+
+from torch.utils.data import Dataset, DataLoader
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -71,9 +76,7 @@ def tile_vector_as_image_channels_np(vector_op, image_shape):
     # tile the pixel into a full image
     tile_dimensions = [1, image_shape[1], image_shape[2], 1]
     vector_op = np.tile(vector_op, tile_dimensions)
-    # if K.backend() is 'tensorflow':
-    #     output_shape = [ivs[0], image_shape[1], image_shape[2], ivs[1]]
-    #     vector_op.set_shape(output_shape)
+
     return vector_op
 
 
@@ -303,12 +306,8 @@ def encode_action_and_images(
     """
 
     action_labels = np.array(action_labels)
-    init_images = keras_applications.imagenet_utils._preprocess_numpy_input(
-        np.array(init_images, dtype=np.float32),
-        data_format='channels_last', mode='tf')
-    current_images = keras_applications.imagenet_utils._preprocess_numpy_input(
-        np.array(current_images, dtype=np.float32),
-        data_format='channels_last', mode='tf')
+    init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
+    current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
     poses = np.array(poses)
 
     # print('poses shape: ' + str(poses.shape))
@@ -361,7 +360,6 @@ def encode_action_and_images(
         assert len(vec.shape) == 2, 'we only support a 2D input vector for now but found shape:' + str(vec.shape)
         X = concat_images_with_tiled_vector_np(X[:2], vec)
 
-
     # check if any of the data features expect nxygrid normalized x, y coordinate grid values
     grid_labels = [s for s in data_features_to_extract if 'nxygrid' in s]
     # print('grid labels: ' + str(grid_labels))
@@ -384,11 +382,25 @@ def inference_mode_gen(file_names):
     return file_list_updated
 
 
-class CostarBlockStackingSequence(Sequence):
-    '''Generates a batch of data from the stacking dataset.
+def preprocess_numpy_input(x):
+    """From keras_applications.imagenet_utils
+    https://github.com/keras-team/keras-applications/blob/master/keras_applications/imagenet_utils.py
 
-    # TODO(ahundt) match the preprocessing /augmentation apis of cornell & google dataset
-    '''
+    Preprocesses a Numpy array encoding a batch of images.
+    Will scale pixels between -1 and 1, sample-wise. ('tf' mode in original code)
+    # Arguments
+        x: Input array, 3D or 4D.
+    # Returns
+        Preprocessed Numpy array.
+    """
+    if not issubclass(x.dtype.type, np.floating):
+        x = x.astype(np.float32, copy=False)
+
+    x /= 127.5
+    x -= 1.
+    return x
+
+class CostarBlockStackingDataset(Dataset):
     def __init__(self, list_example_filenames,
                  label_features_to_extract=None, data_features_to_extract=None,
                  total_actions_available=41,
@@ -438,8 +450,6 @@ class CostarBlockStackingSequence(Sequence):
         nxygrid: at each pixel, concatenate two additional channels containing the pixel coordinate x and y as values between 0 and 1.
             This is similar to uber's "coordconv" paper.
         '''
-        if random_state is None:
-            random_state = RandomState(seed)
         self.batch_size = batch_size
         self.list_example_filenames = list_example_filenames
         self.shuffle = shuffle
@@ -476,339 +486,11 @@ class CostarBlockStackingSequence(Sequence):
         self.estimated_time_steps_per_example = estimated_time_steps_per_example
         if self.inference_mode is True:
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
-        # if crop_shape is None:
-        #     # height width 3
-        #     crop_shape = (224, 224, 3)
-        # self.crop_shape = crop_shape
-
-    def __len__(self):
-        """Denotes the number of batches per epoch
-        """
-        return int(np.floor(len(self.list_example_filenames) / self.batch_size))
 
     def __getitem__(self, index):
-        """Generate one batch of data
-        """
-        # Generate indexes of the batch
-        indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
-        if self.verbose > 0:
-            print("batch getitem indices:" + str(indexes))
-        # Find list of example_filenames
-        list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
-        # Generate data
-        self.infer_index = self.infer_index + 1
-        X, y = self.__data_generation(list_example_filenames_temp, self.infer_index)
-
-        return X, y
-
-    def get_estimated_time_steps_per_example(self):
-        """ Get the estimated images per example,
-
-        Run extra steps in proportion to this if you want to get close to visiting every image.
-        """
-        return self.estimated_time_steps_per_example
-
-    def on_epoch_end(self):
-        """ Updates indexes after each epoch
-        """
-        if self.seed is not None and not self.is_training:
-            # repeat the same order if we're validating or testing
-            # continue the large random sequence for training
-            self.random_state.seed(self.seed)
-        self.indexes = np.arange(len(self.list_example_filenames))
-        if self.shuffle is True:
-            self.random_state.shuffle(self.indexes)
-
-    def __data_generation(self, list_Ids, images_index):
-        """ Generates data containing batch_size samples
-
-        # Arguments
-
-        list_Ids: a list of file paths to be read
-        """
-
-        def JpegToNumpy(jpeg):
-            stream = io.BytesIO(jpeg)
-            im = np.asarray(Image.open(stream))
-            try:
-                return im.astype(np.uint8)
-            except(TypeError) as exception:
-                print("Failed to convert PIL image type", exception)
-                print("type ", type(im), "len ", len(im))
-
-        def ConvertImageListToNumpy(data, format='numpy', data_format='NHWC'):
-            """ Convert a list of binary jpeg or png files to numpy format.
-
-            # Arguments
-
-            data: a list of binary jpeg images to convert
-            format: default 'numpy' returns a 4d numpy array,
-                'list' returns a list of 3d numpy arrays
-            """
-            length = len(data)
-            imgs = []
-            for raw in data:
-                img = JpegToNumpy(raw)
-                if data_format == 'NCHW':
-                    img = np.transpose(img, [2, 0, 1])
-                imgs.append(img)
-            if format == 'numpy':
-                imgs = np.array(imgs)
-            return imgs
-        try:
-            # Initialization
-            if self.verbose > 0:
-                print("generating batch: " + str(list_Ids))
-            X = []
-            init_images = []
-            current_images = []
-            poses = []
-            goal_pose = []
-            y = []
-            action_labels = []
-            action_successes = []
-            example_filename = ''
-            if isinstance(list_Ids, int):
-                # if it is just a single int
-                # make it a list so we can iterate
-                list_Ids = [list_Ids]
-
-            # Generate data
-            for i, example_filename in enumerate(list_Ids):
-                example_filename = os.path.expanduser(example_filename)
-                if self.verbose > 0:
-                    print('reading: ' + str(i) + ' path: ' + str(example_filename))
-                # Store sample
-                # X[i,] = np.load('data/' + example_filename + '.npy')
-                x = ()
-                try:
-                    if not os.path.isfile(example_filename):
-                        raise ValueError('CostarBlockStackingSequence: Trying to open something which is not a file: ' + str(example_filename))
-                    with h5py.File(example_filename, 'r') as data:
-                        if 'gripper_action_goal_idx' not in data or 'gripper_action_label' not in data:
-                            raise ValueError('block_stacking_reader.py: You need to run preprocessing before this will work! \n' +
-                                             '    python2 ctp_integration/scripts/view_convert_dataset.py --path ~/.keras/datasets/costar_block_stacking_dataset_v0.4 --preprocess_inplace gripper_action --write'
-                                             '\n File with error: ' + str(example_filename))
-                        # indices = [0]
-                        # len of goal indexes is the same as the number of images, so this saves loading all the images
-                        all_goal_ids = np.array(data['gripper_action_goal_idx'])
-                        if('stacking_reward' in self.label_features_to_extract):
-                            # TODO(ahundt) move this check out of the stacking reward case after files have been updated
-                            if all_goal_ids[-1] > len(all_goal_ids):
-                                raise ValueError(' File contains goal id greater than total number of frames ' + str(example_filename))
-                        if len(all_goal_ids) < 2:
-                            print('block_stacking_reader.py: ' + str(len(all_goal_ids)) + ' goal indices in this file, skipping: ' + example_filename)
-                        if 'success' in example_filename:
-                            label_constant = 1
-                        else:
-                            label_constant = 0
-                        stacking_reward = np.arange(len(all_goal_ids))
-                        stacking_reward = 0.999 * stacking_reward * label_constant
-                        # print("reward estimates", stacking_reward)
-
-                        if self.seed is not None:
-                            rand_max = len(all_goal_ids) - 1
-                            if rand_max <= 1:
-                                print('CostarBlockStackingSequence: not enough goal ids: ' + str(all_goal_ids) + ' file: ' + str(rand_max))
-                            image_indices = self.random_state.randint(1, rand_max, 1)
-                        else:
-                            raise NotImplementedError
-                        indices = [0] + list(image_indices)
-
-                        if self.blend:
-                            img_indices = get_past_goal_indices(image_indices, all_goal_ids, filename=example_filename)
-                        else:
-                            img_indices = indices
-                        if self.inference_mode is True:
-                            if images_index >= len(data['gripper_action_goal_idx']):
-                                self.infer_index = 1
-                                image_idx = 1
-                                # image_idx = (images_index % (len(data['gripper_action_goal_idx']) - 1)) + 1
-                            else:
-                                image_idx = images_index
-
-                            img_indices = [0, image_idx]
-                            # print("image_index", image_idx)
-                            # print("image_true", images_index, len(data['gripper_action_goal_idx']))
-                            # print("new_indices-----", image_idx)
-                        if self.verbose > 0:
-                            print("Indices --", indices)
-                            print('img_indices: ' + str(img_indices))
-                        rgb_images = list(data['image'][img_indices])
-                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
-
-                        if self.blend:
-                            # TODO(ahundt) move this to after the resize loop for a speedup
-                            blended_image = blend_image_sequence(rgb_images)
-                            rgb_images = [rgb_images[0], blended_image]
-                        # resize using skimage
-                        rgb_images_resized = []
-                        for k, images in enumerate(rgb_images):
-                            if (self.is_training and self.random_augmentation is not None and
-                                    self.random_shift and np.random.random() > self.random_augmentation):
-                                # apply random shift to the images before resizing
-                                images = keras_preprocessing.image.random_shift(
-                                    images,
-                                    # height, width
-                                    1./(48. * 2.), 1./(64. * 2.),
-                                    row_axis=0, col_axis=1, channel_axis=2)
-                            # TODO(ahundt) improve crop/resize to match cornell_grasp_dataset_reader
-                            if self.output_shape is not None:
-                                resized_image = resize(images, self.output_shape, mode='constant', preserve_range=True, order=1)
-                            else:
-                                resized_image = images
-                            if self.is_training and self.random_augmentation:
-                                # do some image augmentation with random erasing & cutout
-                                resized_image = random_eraser(resized_image)
-                            rgb_images_resized.append(resized_image)
-
-                        init_images.append(rgb_images_resized[0])
-                        current_images.append(rgb_images_resized[1])
-                        poses.append(np.array(data[self.pose_name][indices[1:]])[0])
-                        if(self.data_features_to_extract is not None and 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract):
-                            next_goal_idx = all_goal_ids[indices[1:][0]]
-                            goal_pose.append(np.array(data[self.pose_name][next_goal_idx]))
-                            print("final pose added", goal_pose)
-                            current_stacking_reward = stacking_reward[indices[1]]
-                            print("reward estimate", current_stacking_reward)
-                        # x = x + tuple([rgb_images[indices]])
-                        # x = x + tuple([np.array(data[self.pose_name])[indices]])
-
-                        # WARNING: IF YOU CHANGE THIS ACTION ENCODING CODE BELOW, ALSO CHANGE encode_action() function ABOVE
-                        if (self.data_features_to_extract is not None and
-                                ('image_0_image_n_vec_xyz_aaxyz_nsc_15' in self.data_features_to_extract or
-                                 'image_0_image_n_vec_xyz_nxygrid_12' in self.data_features_to_extract or
-                                 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' in self.data_features_to_extract or
-                                 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract) and not self.one_hot_encoding):
-                            # normalized floating point encoding of action vector
-                            # from 0 to 1 in a single float which still becomes
-                            # a 2d array of dimension batch_size x 1
-                            # np.expand_dims(data['gripper_action_label'][indices[1:]], axis=-1) / self.total_actions_available
-                            for j in indices[1:]:
-                                action = [float(data['gripper_action_label'][j] / self.total_actions_available)]
-                                action_labels.append(action)
-                        else:
-                            # one hot encoding
-                            for j in indices[1:]:
-                                # generate the action label one-hot encoding
-                                action = np.zeros(self.total_actions_available)
-                                action[data['gripper_action_label'][j]] = 1
-                                action_labels.append(action)
-                        # action_labels = np.array(action_labels)
-
-                        # print(action_labels)
-                        # x = x + tuple([action_labels])
-                        # X.append(x)
-                        # action_labels = np.unique(data['gripper_action_label'])
-                        # print(np.array(data['labels_to_name']).shape)
-                        # X.append(np.array(data['pose'])[indices])
-
-                        # Store class
-                        label = ()
-                        # change to goals computed
-                        index1 = indices[1]
-                        goal_ids = all_goal_ids[index1]
-                        # print(index1)
-                        label = np.array(data[self.pose_name])[goal_ids]
-                        # print(type(label))
-                        # for items in list(data['all_tf2_frames_from_base_link_vec_quat_xyzxyzw_json'][indices]):
-                        #     json_data = json.loads(items.decode('UTF-8'))
-                        #     label = label + tuple([json_data['gripper_center']])
-                        #     print(np.array(json_data['gripper_center']))
-                            # print(json_data.keys())
-                            # y.append(np.array(json_data['camera_rgb_frame']))
-                        if('stacking_reward' in self.label_features_to_extract):
-                            # print(y)
-                            y.append(current_stacking_reward)
-                        else:
-                            y.append(label)
-                        if 'success' in example_filename:
-                            action_successes = action_successes + [1]
-                        else:
-                            action_successes = action_successes + [0]
-                        # print("y = ", y)
-                except IOError as ex:
-                    print('Error: Skipping file due to IO error when opening ' +
-                          example_filename + ': ' + str(ex) + ' using the last example twice for batch')
-
-            action_labels = np.array(action_labels)
-            init_images = keras_applications.imagenet_utils._preprocess_numpy_input(
-                np.array(init_images, dtype=np.float32),
-                data_format='channels_last', mode='tf')
-            current_images = keras_applications.imagenet_utils._preprocess_numpy_input(
-                np.array(current_images, dtype=np.float32),
-                data_format='channels_last', mode='tf')
-            poses = np.array(poses)
-
-
-            encoded_goal_pose = None
-            # print('encoded poses shape: ' + str(encoded_poses.shape))
-            # print('action labels shape: ' + str(action_labels.shape))
-            # print('encoded poses vec shape: ' + str(action_poses_vec.shape))
-            # print("---",init_images.shape)
-            # init_images = tf.image.resize_images(init_images,[224,224])
-            # current_images = tf.image.resize_images(current_images,[224,224])
-            # print("---",init_images.shape)
-            # X = init_images
-
-            X = encode_action_and_images(
-                data_features_to_extract=self.data_features_to_extract,
-                poses=poses, action_labels=action_labels,
-                init_images=init_images, current_images=current_images,
-                y=y, random_augmentation=self.random_encoding_augmentation)
-
-            # print("type=======",type(X))
-            # print("shape=====",X.shape)
-
-            # determine the label
-            if('stacking_reward' in self.label_features_to_extract):
-                y = encode_label(self.label_features_to_extract, y, action_successes, self.random_augmentation, current_stacking_reward)
-            else:
-                y = encode_label(self.label_features_to_extract, y, action_successes, self.random_augmentation, None)
-
-            # Debugging checks
-            if X is None:
-                raise ValueError('Unsupported input data for X: ' + str(x))
-            if y is None:
-                raise ValueError('Unsupported input data for y: ' + str(x))
-
-            # Assemble the data batch
-            batch = (X, y)
-
-            if self.verbose > 0:
-                # diff should be nonzero for most timesteps except just before the gripper closes!
-                print('encoded current poses: ' + str(poses) + ' labels: ' + str(y))
-                # commented next line due to dimension issue
-                # + ' diff: ' + str(poses - y))
-                print("generated batch: " + str(list_Ids))
-        except Exception as ex:
-            print('CostarBlockStackingSequence: Keras will often swallow exceptions without a stack trace, '
-                  'so we are printing the stack trace here before re-raising the error.')
-            ex_type, ex, tb = sys.exc_info()
-            traceback.print_tb(tb)
-            # deletion must be explicit to prevent leaks
-            # https://stackoverflow.com/a/16946886/99379
-            del tb
-            raise
-
-        return batch
-
-
-def block_stacking_generator(sequence):
-
-    # training_generator = CostarBlockStackingSequence(filenames, batch_size=1)
-    epoch_size = len(sequence)
-    step = 0
-    while True:
-        if step > epoch_size:
-            step = 0
-            sequence.on_epoch_end()
-        batch = sequence.__getitem__(step)
-        print(np.array(batch).shape)
-        print(np.array(batch[0][0]).shape)
-        exit()
-        step += 1
-        yield batch
+        '''Get the designated item from the dataset
+        '''
+        pass
 
 
 if __name__ == "__main__":
