@@ -7,9 +7,6 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-# import keras
-# import tensorflow as tf
-# from tensorflow.python.platform import flags
 import torch
 from shapely.geometry import Polygon
 from pyquaternion import Quaternion

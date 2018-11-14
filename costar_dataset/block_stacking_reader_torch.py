@@ -14,15 +14,9 @@ from skimage.transform import resize
 import numpy as np
 from numpy.random import RandomState
 import json
-# import keras
-# from keras.utils import Sequence
-# from keras.utils import OrderedEnqueuer
-import tensorflow as tf
 import hypertree_pose_metrics_torch as hypertree_pose_metrics
-# import keras_applications
-# import keras_preprocessing
-
-from torch.utils.data import Dataset, Sampler, DataLoader
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.sampler import Sampler
 import scipy
 
 
@@ -518,6 +512,18 @@ def apply_affine_transform(x, theta=0, tx=0, ty=0, shear=0, zx=1, zy=1,
     return x
 
 
+def transform_matrix_offset_center(matrix, x, y):
+    """From keras_preprocessing.images.apply_affine_transform
+    https://github.com/keras-team/keras-preprocessing/blob/master/keras_preprocessing/image.py
+    """
+    o_x = float(x) / 2 + 0.5
+    o_y = float(y) / 2 + 0.5
+    offset_matrix = np.array([[1, 0, o_x], [0, 1, o_y], [0, 0, 1]])
+    reset_matrix = np.array([[1, 0, -o_x], [0, 1, -o_y], [0, 0, 1]])
+    transform_matrix = np.dot(np.dot(offset_matrix, matrix), reset_matrix)
+    return transform_matrix
+
+
 class CostarBlockStackingDataset(Dataset):
     def __init__(self, list_example_filenames,
                  label_features_to_extract=None, data_features_to_extract=None,
@@ -626,7 +632,7 @@ class CostarBlockStackingDataset(Dataset):
         X, y = self.__data_generation(list_example_filenames_temp, self.infer_index)
 
         return X, y
-    
+
     def get_estimated_time_steps_per_example(self):
         """ Get the estimated images per example,
 
@@ -858,12 +864,8 @@ class CostarBlockStackingDataset(Dataset):
                           example_filename + ': ' + str(ex) + ' using the last example twice for batch')
 
             action_labels = np.array(action_labels)
-            init_images = preprocess_numpy_input(
-                np.array(init_images, dtype=np.float32),
-                data_format='channels_last', mode='tf')
-            current_images = preprocess_numpy_input(
-                np.array(current_images, dtype=np.float32),
-                data_format='channels_last', mode='tf')
+            init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
+            current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
             poses = np.array(poses)
 
             encoded_goal_pose = None
@@ -927,15 +929,16 @@ class BlockStackingSampler(Sampler):
         self.step = 0
 
     def __iter__(self):
-        if self.step > self.epoch_size:
-            self.step = 0
-            self.data_source.on_epoch_end()
-        batch = self.data_source.__getitem__(self.step)
-        print(np.array(batch).shape)
-        print(np.array(batch[0][0]).shape)
-        exit()
-        self.step += 1
-        yield batch
+        while True:
+            if self.step > self.epoch_size:
+                self.step = 0
+                self.data_source.on_epoch_end()
+            batch = self.data_source.__getitem__(self.step)
+            # print(np.array(batch).shape)
+            # print(np.array(batch[0][0]).shape)
+            # exit()
+            self.step += 1
+            yield batch
 
     def __len__(self):
         return len(self.data_source)
@@ -945,8 +948,8 @@ if __name__ == "__main__":
     visualize = False
     output_shape = (224, 224, 3)
     # output_shape = None
-    tf.enable_eager_execution()
-    filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/*success.h5f'))
+    # tf.enable_eager_execution()
+    filenames = glob.glob(os.path.expanduser('~/Documents/costar_dataset/blocks_only/*success.h5f'))
     # print(filenames)
     # filenames_new = inference_mode_gen(filenames)
     costar_dataset = CostarBlockStackingDataset(
@@ -960,11 +963,11 @@ if __name__ == "__main__":
     # print(len(filenames_new))
 
     block_stacking_sampler = BlockStackingSampler(costar_dataset)
-    iter(block_stacking_sampler)
+    it = iter(block_stacking_sampler)
     from tqdm import tqdm as tqdm
     progress = tqdm(range(num_batches))
     for i in progress:
-        data = next(block_stacking_sampler)
+        data = next(it)
         progress.set_description('step: ' + str(i) + ' data type: ' + str(type(data)))
 
         if visualize:
@@ -983,14 +986,13 @@ if __name__ == "__main__":
             # plt.show()
     # a = next(training_generator)
     generator = DataLoader(
-        costar_dataset, batch_size=1, shuffle=True, sampler=block_stacking_sampler,
-        num_workers=1)
+        costar_dataset, batch_size=1, shuffle=False, sampler=block_stacking_sampler, num_workers=1)
     print("-------------------")
-    generator_ouput = next(generator)
-    print("-------------------op")
-    x, y = generator_ouput
-    print("x-shape-----------", x.shape)
-    print("y-shape---------", y.shape)
+    for generator_output in generator:
+        print("-------------------op")
+        x, y = generator_output
+        print("x-shape-----------", x.shape)
+        print("y-shape---------", y.shape)
 
     # X,y=training_generator.__getitem__(1)
     #print(X.keys())
