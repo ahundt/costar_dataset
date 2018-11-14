@@ -18,7 +18,7 @@ import json
 # from keras.utils import Sequence
 # from keras.utils import OrderedEnqueuer
 import tensorflow as tf
-import hypertree_pose_metrics
+import hypertree_pose_metrics_torch
 # import keras_applications
 # import keras_preprocessing
 

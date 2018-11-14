@@ -1,13 +1,16 @@
-
+'''Originally written for Tensorflow by Andrew Hundt (ahundt) in jhu-lcsr/costar_plan (https://github.com/jhu-lcsr/costar_plan)
+Ported to PyTorch by Chia-Hung Lin (rexxarchl)
+'''
 import os
 import copy
 import math
 import numpy as np
 from tqdm import tqdm
 
-import keras
-import tensorflow as tf
-from tensorflow.python.platform import flags
+# import keras
+# import tensorflow as tf
+# from tensorflow.python.platform import flags
+import torch
 from shapely.geometry import Polygon
 from pyquaternion import Quaternion
 import sklearn
@@ -163,13 +166,13 @@ def rectangle_homogeneous_lines(rv):
     # ax + by + c = 0
     dv = rv[0] - rv[1]
     # TODO(ahundt) make sure cross product doesn't need to be in xy order
-    r0abc = K.concatenate([dv[0], dv[1], tf.cross(rv[0], rv[1])])
+    r0abc = torch.cat([dv[0], dv[1], torch.cross(rv[0], rv[1])])
     dv = rv[1] - rv[2]
-    r1abc = K.concatenate([dv[1], dv[2], tf.cross(rv[1], rv[2])])
+    r1abc = torch.cat([dv[1], dv[2], torch.cross(rv[1], rv[2])])
     dv = rv[2] - rv[3]
-    r2abc = K.concatenate([dv[2], dv[3], tf.cross(rv[2], rv[3])])
+    r2abc = torch.cat([dv[2], dv[3], torch.cross(rv[2], rv[3])])
     dv = rv[3] - rv[0]
-    r3abc = K.concatenate([dv[3], dv[0], tf.cross(rv[3], rv[0])])
+    r3abc = torch.cat([dv[3], dv[0], torch.cross(rv[3], rv[0])])
     return [r0abc, r1abc, r2abc, r3abc]
 
 
@@ -737,7 +740,8 @@ def grasp_jaccard(y_true, y_pred):
         It is very important to be aware that sin(2*theta) and cos(2*theta) are expected,
         additionally all coordinates and height/width are normalized by the network's input dimensions.
     """
-    scores = tf.py_func(func=grasp_jaccard_batch, inp=[y_true, y_pred], Tout=tf.float32, stateful=False)
+    # scores = tf.py_func(func=grasp_jaccard_batch, inp=[y_true, y_pred], Tout=tf.float32, stateful=False)
+    scores = grasp_jaccard_batch(y_true, y_pred)
     return scores
 
 
@@ -928,12 +932,14 @@ def grasp_acc(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation=0.01, 
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    # NOTE: If the below does not work, try y_true_xyz_aaxyz_nsc.shape[0]
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -953,12 +959,13 @@ def grasp_acc_5mm_7_5deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transla
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -978,12 +985,13 @@ def grasp_acc_1cm_15deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translat
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1002,12 +1010,13 @@ def grasp_acc_2cm_30deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translat
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1026,12 +1035,13 @@ def grasp_acc_4cm_60deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translat
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1050,12 +1060,13 @@ def grasp_acc_8cm_120deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transla
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1074,12 +1085,13 @@ def grasp_acc_16cm_240deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transl
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1098,12 +1110,13 @@ def grasp_acc_32cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transl
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1122,12 +1135,13 @@ def grasp_acc_64cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transl
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1146,12 +1160,13 @@ def grasp_acc_128cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_trans
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1170,12 +1185,13 @@ def grasp_acc_256cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_trans
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1194,12 +1210,13 @@ def grasp_acc_512cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_trans
        rotations must be less than this angular distance away.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        grasp_accuracy_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
-        [tf.float32], stateful=False,
-        name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     grasp_accuracy_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
+    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1210,12 +1227,13 @@ def cart_error(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc):
     max_rotation defaults to 15 degrees in radians.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        absolute_cart_distance_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc],
-        [tf.float32], stateful=False,
-        name='py_func/absolute_cart_distance_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     absolute_cart_distance_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/absolute_cart_distance_xyz_aaxyz_nsc_batch')
+    [filter_result] = absolute_cart_distance_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
@@ -1226,12 +1244,13 @@ def angle_error(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc):
     max_rotation defaults to 15 degrees in radians.
     """
     # TODO(ahundt) make a single, simple call for grasp_accuracy_xyz_aaxyz_nsc, no py_func etc
-    [filter_result] = tf.py_func(
-        absolute_angle_distance_xyz_aaxyz_nsc_batch,
-        [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc],
-        [tf.float32], stateful=False,
-        name='py_func/absolute_angle_distance_xyz_aaxyz_nsc_batch')
-    filter_result.set_shape(y_true_xyz_aaxyz_nsc.get_shape()[0])
+    # [filter_result] = tf.py_func(
+    #     absolute_angle_distance_xyz_aaxyz_nsc_batch,
+    #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc],
+    #     [tf.float32], stateful=False,
+    #     name='py_func/absolute_angle_distance_xyz_aaxyz_nsc_batch')
+    [filter_result] = absolute_angle_distance_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
+    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
     return filter_result
 
 
