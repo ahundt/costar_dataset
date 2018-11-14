@@ -14,15 +14,16 @@ from skimage.transform import resize
 import numpy as np
 from numpy.random import RandomState
 import json
-import keras
-from keras.utils import Sequence
-from keras.utils import OrderedEnqueuer
+# import keras
+# from keras.utils import Sequence
+# from keras.utils import OrderedEnqueuer
 import tensorflow as tf
 import hypertree_pose_metrics
-import keras_applications
-import keras_preprocessing
+# import keras_applications
+# import keras_preprocessing
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, Sampler, DataLoader
+import scipy
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -400,6 +401,123 @@ def preprocess_numpy_input(x):
     x -= 1.
     return x
 
+
+def random_shift(x, wrg, hrg, row_axis=1, col_axis=2, channel_axis=0,
+                 fill_mode='nearest', cval=0., interpolation_order=1):
+    """Performs a random spatial shift of a Numpy image tensor.
+    From keras_preprocessing.images.random_shift
+    https://github.com/keras-team/keras-preprocessing/blob/master/keras_preprocessing/image.py
+    # Arguments
+        x: Input tensor. Must be 3D.
+        wrg: Width shift range, as a float fraction of the width.
+        hrg: Height shift range, as a float fraction of the height.
+        row_axis: Index of axis for rows in the input tensor.
+        col_axis: Index of axis for columns in the input tensor.
+        channel_axis: Index of axis for channels in the input tensor.
+        fill_mode: Points outside the boundaries of the input
+            are filled according to the given mode
+            (one of `{'constant', 'nearest', 'reflect', 'wrap'}`).
+        cval: Value used for points outside the boundaries
+            of the input if `mode='constant'`.
+        interpolation_order int: order of spline interpolation.
+            see `ndimage.interpolation.affine_transform`
+    # Returns
+        Shifted Numpy image tensor.
+    """
+    h, w = x.shape[row_axis], x.shape[col_axis]
+    tx = np.random.uniform(-hrg, hrg) * h
+    ty = np.random.uniform(-wrg, wrg) * w
+    x = apply_affine_transform(x, tx=tx, ty=ty, channel_axis=channel_axis,
+                               fill_mode=fill_mode, cval=cval,
+                               order=interpolation_order)
+    return x
+
+
+def apply_affine_transform(x, theta=0, tx=0, ty=0, shear=0, zx=1, zy=1,
+                           row_axis=0, col_axis=1, channel_axis=2,
+                           fill_mode='nearest', cval=0., order=1):
+    """Applies an affine transformation specified by the parameters given.
+    From keras_preprocessing.images.apply_affine_transform
+    https://github.com/keras-team/keras-preprocessing/blob/master/keras_preprocessing/image.py
+    # Arguments
+        x: 2D numpy array, single image.
+        theta: Rotation angle in degrees.
+        tx: Width shift.
+        ty: Heigh shift.
+        shear: Shear angle in degrees.
+        zx: Zoom in x direction.
+        zy: Zoom in y direction
+        row_axis: Index of axis for rows in the input image.
+        col_axis: Index of axis for columns in the input image.
+        channel_axis: Index of axis for channels in the input image.
+        fill_mode: Points outside the boundaries of the input
+            are filled according to the given mode
+            (one of `{'constant', 'nearest', 'reflect', 'wrap'}`).
+        cval: Value used for points outside the boundaries
+            of the input if `mode='constant'`.
+        order int: order of interpolation
+    # Returns
+        The transformed version of the input.
+    """
+    if scipy is None:
+        raise ImportError('Image transformations require SciPy. '
+                          'Install SciPy.')
+    transform_matrix = None
+    if theta != 0:
+        theta = np.deg2rad(theta)
+        rotation_matrix = np.array([[np.cos(theta), -np.sin(theta), 0],
+                                    [np.sin(theta), np.cos(theta), 0],
+                                    [0, 0, 1]])
+        transform_matrix = rotation_matrix
+
+    if tx != 0 or ty != 0:
+        shift_matrix = np.array([[1, 0, tx],
+                                 [0, 1, ty],
+                                 [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = shift_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, shift_matrix)
+
+    if shear != 0:
+        shear = np.deg2rad(shear)
+        shear_matrix = np.array([[1, -np.sin(shear), 0],
+                                 [0, np.cos(shear), 0],
+                                 [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = shear_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, shear_matrix)
+
+    if zx != 1 or zy != 1:
+        zoom_matrix = np.array([[zx, 0, 0],
+                                [0, zy, 0],
+                                [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = zoom_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, zoom_matrix)
+
+    if transform_matrix is not None:
+        h, w = x.shape[row_axis], x.shape[col_axis]
+        transform_matrix = transform_matrix_offset_center(
+            transform_matrix, h, w)
+        x = np.rollaxis(x, channel_axis, 0)
+        final_affine_matrix = transform_matrix[:2, :2]
+        final_offset = transform_matrix[:2, 2]
+
+        channel_images = [scipy.ndimage.interpolation.affine_transform(
+            x_channel,
+            final_affine_matrix,
+            final_offset,
+            order=order,
+            mode=fill_mode,
+            cval=cval) for x_channel in x]
+        x = np.stack(channel_images, axis=0)
+        x = np.rollaxis(x, 0, channel_axis + 1)
+    return x
+
+
 class CostarBlockStackingDataset(Dataset):
     def __init__(self, list_example_filenames,
                  label_features_to_extract=None, data_features_to_extract=None,
@@ -450,6 +568,8 @@ class CostarBlockStackingDataset(Dataset):
         nxygrid: at each pixel, concatenate two additional channels containing the pixel coordinate x and y as values between 0 and 1.
             This is similar to uber's "coordconv" paper.
         '''
+        if random_state is None:
+            random_state = RandomState(seed)
         self.batch_size = batch_size
         self.list_example_filenames = list_example_filenames
         self.shuffle = shuffle
@@ -487,10 +607,338 @@ class CostarBlockStackingDataset(Dataset):
         if self.inference_mode is True:
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
 
+    def __len__(self):
+        """Denotes the number of batches per epoch
+        """
+        return int(np.floor(len(self.list_example_filenames) / self.batch_size))
+
     def __getitem__(self, index):
-        '''Get the designated item from the dataset
+        '''Generate one batch of data
         '''
-        pass
+        # Generate indexes of the batch
+        indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
+        if self.verbose > 0:
+            print("batch getitem indices:" + str(indexes))
+        # Find list of example_filenames
+        list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
+        # Generate data
+        self.infer_index = self.infer_index + 1
+        X, y = self.__data_generation(list_example_filenames_temp, self.infer_index)
+
+        return X, y
+    
+    def get_estimated_time_steps_per_example(self):
+        """ Get the estimated images per example,
+
+        Run extra steps in proportion to this if you want to get close to visiting every image.
+        """
+        return self.estimated_time_steps_per_example
+
+    def on_epoch_end(self):
+        """ Updates indexes after each epoch
+        """
+        if self.seed is not None and not self.is_training:
+            # repeat the same order if we're validating or testing
+            # continue the large random sequence for training
+            self.random_state.seed(self.seed)
+        self.indexes = np.arange(len(self.list_example_filenames))
+        if self.shuffle is True:
+            self.random_state.shuffle(self.indexes)
+
+    def __data_generation(self, list_Ids, images_index):
+        """ Generates data containing batch_size samples
+
+        # Arguments
+
+        list_Ids: a list of file paths to be read
+        """
+
+        def JpegToNumpy(jpeg):
+            stream = io.BytesIO(jpeg)
+            im = np.asarray(Image.open(stream))
+            try:
+                return im.astype(np.uint8)
+            except(TypeError) as exception:
+                print("Failed to convert PIL image type", exception)
+                print("type ", type(im), "len ", len(im))
+
+        def ConvertImageListToNumpy(data, format='numpy', data_format='NHWC'):
+            """ Convert a list of binary jpeg or png files to numpy format.
+
+            # Arguments
+
+            data: a list of binary jpeg images to convert
+            format: default 'numpy' returns a 4d numpy array,
+                'list' returns a list of 3d numpy arrays
+            """
+            length = len(data)
+            imgs = []
+            for raw in data:
+                img = JpegToNumpy(raw)
+                if data_format == 'NCHW':
+                    img = np.transpose(img, [2, 0, 1])
+                imgs.append(img)
+            if format == 'numpy':
+                imgs = np.array(imgs)
+            return imgs
+        try:
+            # Initialization
+            if self.verbose > 0:
+                print("generating batch: " + str(list_Ids))
+            X = []
+            init_images = []
+            current_images = []
+            poses = []
+            goal_pose = []
+            y = []
+            action_labels = []
+            action_successes = []
+            example_filename = ''
+            if isinstance(list_Ids, int):
+                # if it is just a single int
+                # make it a list so we can iterate
+                list_Ids = [list_Ids]
+
+            # Generate data
+            for i, example_filename in enumerate(list_Ids):
+                example_filename = os.path.expanduser(example_filename)
+                if self.verbose > 0:
+                    print('reading: ' + str(i) + ' path: ' + str(example_filename))
+                # Store sample
+                # X[i,] = np.load('data/' + example_filename + '.npy')
+                x = ()
+                try:
+                    if not os.path.isfile(example_filename):
+                        raise ValueError('CostarBlockStackingDataset: Trying to open something which is not a file: ' + str(example_filename))
+                    with h5py.File(example_filename, 'r') as data:
+                        if 'gripper_action_goal_idx' not in data or 'gripper_action_label' not in data:
+                            raise ValueError('block_stacking_reader.py: You need to run preprocessing before this will work! \n' +
+                                             '    python2 ctp_integration/scripts/view_convert_dataset.py --path ~/.keras/datasets/costar_block_stacking_dataset_v0.4 --preprocess_inplace gripper_action --write'
+                                             '\n File with error: ' + str(example_filename))
+                        # indices = [0]
+                        # len of goal indexes is the same as the number of images, so this saves loading all the images
+                        all_goal_ids = np.array(data['gripper_action_goal_idx'])
+                        if('stacking_reward' in self.label_features_to_extract):
+                            # TODO(ahundt) move this check out of the stacking reward case after files have been updated
+                            if all_goal_ids[-1] > len(all_goal_ids):
+                                raise ValueError(' File contains goal id greater than total number of frames ' + str(example_filename))
+                        if len(all_goal_ids) < 2:
+                            print('block_stacking_reader.py: ' + str(len(all_goal_ids)) + ' goal indices in this file, skipping: ' + example_filename)
+                        if 'success' in example_filename:
+                            label_constant = 1
+                        else:
+                            label_constant = 0
+                        stacking_reward = np.arange(len(all_goal_ids))
+                        stacking_reward = 0.999 * stacking_reward * label_constant
+                        # print("reward estimates", stacking_reward)
+
+                        if self.seed is not None:
+                            rand_max = len(all_goal_ids) - 1
+                            if rand_max <= 1:
+                                print('CostarBlockStackingDataset: not enough goal ids: ' + str(all_goal_ids) + ' file: ' + str(rand_max))
+                            image_indices = self.random_state.randint(1, rand_max, 1)
+                        else:
+                            raise NotImplementedError
+                        indices = [0] + list(image_indices)
+
+                        if self.blend:
+                            img_indices = get_past_goal_indices(image_indices, all_goal_ids, filename=example_filename)
+                        else:
+                            img_indices = indices
+                        if self.inference_mode is True:
+                            if images_index >= len(data['gripper_action_goal_idx']):
+                                self.infer_index = 1
+                                image_idx = 1
+                                # image_idx = (images_index % (len(data['gripper_action_goal_idx']) - 1)) + 1
+                            else:
+                                image_idx = images_index
+
+                            img_indices = [0, image_idx]
+                            # print("image_index", image_idx)
+                            # print("image_true", images_index, len(data['gripper_action_goal_idx']))
+                            # print("new_indices-----", image_idx)
+                        if self.verbose > 0:
+                            print("Indices --", indices)
+                            print('img_indices: ' + str(img_indices))
+                        rgb_images = list(data['image'][img_indices])
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
+
+                        if self.blend:
+                            # TODO(ahundt) move this to after the resize loop for a speedup
+                            blended_image = blend_image_sequence(rgb_images)
+                            rgb_images = [rgb_images[0], blended_image]
+                        # resize using skimage
+                        rgb_images_resized = []
+                        for k, images in enumerate(rgb_images):
+                            if (self.is_training and self.random_augmentation is not None and
+                                    self.random_shift and np.random.random() > self.random_augmentation):
+                                # apply random shift to the images before resizing
+                                images = random_shift(
+                                    images,
+                                    # height, width
+                                    1./(48. * 2.), 1./(64. * 2.),
+                                    row_axis=0, col_axis=1, channel_axis=2)
+                            # TODO(ahundt) improve crop/resize to match cornell_grasp_dataset_reader
+                            if self.output_shape is not None:
+                                resized_image = resize(images, self.output_shape, mode='constant', preserve_range=True, order=1)
+                            else:
+                                resized_image = images
+                            if self.is_training and self.random_augmentation:
+                                # do some image augmentation with random erasing & cutout
+                                resized_image = random_eraser(resized_image)
+                            rgb_images_resized.append(resized_image)
+
+                        init_images.append(rgb_images_resized[0])
+                        current_images.append(rgb_images_resized[1])
+                        poses.append(np.array(data[self.pose_name][indices[1:]])[0])
+                        if(self.data_features_to_extract is not None and 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract):
+                            next_goal_idx = all_goal_ids[indices[1:][0]]
+                            goal_pose.append(np.array(data[self.pose_name][next_goal_idx]))
+                            print("final pose added", goal_pose)
+                            current_stacking_reward = stacking_reward[indices[1]]
+                            print("reward estimate", current_stacking_reward)
+                        # x = x + tuple([rgb_images[indices]])
+                        # x = x + tuple([np.array(data[self.pose_name])[indices]])
+
+                        # WARNING: IF YOU CHANGE THIS ACTION ENCODING CODE BELOW, ALSO CHANGE encode_action() function ABOVE
+                        if (self.data_features_to_extract is not None and
+                                ('image_0_image_n_vec_xyz_aaxyz_nsc_15' in self.data_features_to_extract or
+                                 'image_0_image_n_vec_xyz_nxygrid_12' in self.data_features_to_extract or
+                                 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' in self.data_features_to_extract or
+                                 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract) and not self.one_hot_encoding):
+                            # normalized floating point encoding of action vector
+                            # from 0 to 1 in a single float which still becomes
+                            # a 2d array of dimension batch_size x 1
+                            # np.expand_dims(data['gripper_action_label'][indices[1:]], axis=-1) / self.total_actions_available
+                            for j in indices[1:]:
+                                action = [float(data['gripper_action_label'][j] / self.total_actions_available)]
+                                action_labels.append(action)
+                        else:
+                            # one hot encoding
+                            for j in indices[1:]:
+                                # generate the action label one-hot encoding
+                                action = np.zeros(self.total_actions_available)
+                                action[data['gripper_action_label'][j]] = 1
+                                action_labels.append(action)
+                        # action_labels = np.array(action_labels)
+
+                        # print(action_labels)
+                        # x = x + tuple([action_labels])
+                        # X.append(x)
+                        # action_labels = np.unique(data['gripper_action_label'])
+                        # print(np.array(data['labels_to_name']).shape)
+                        # X.append(np.array(data['pose'])[indices])
+
+                        # Store class
+                        label = ()
+                        # change to goals computed
+                        index1 = indices[1]
+                        goal_ids = all_goal_ids[index1]
+                        # print(index1)
+                        label = np.array(data[self.pose_name])[goal_ids]
+                        # print(type(label))
+                        # for items in list(data['all_tf2_frames_from_base_link_vec_quat_xyzxyzw_json'][indices]):
+                        #     json_data = json.loads(items.decode('UTF-8'))
+                        #     label = label + tuple([json_data['gripper_center']])
+                        #     print(np.array(json_data['gripper_center']))
+                        #     print(json_data.keys())
+                        #     y.append(np.array(json_data['camera_rgb_frame']))
+                        if('stacking_reward' in self.label_features_to_extract):
+                            # print(y)
+                            y.append(current_stacking_reward)
+                        else:
+                            y.append(label)
+                        if 'success' in example_filename:
+                            action_successes = action_successes + [1]
+                        else:
+                            action_successes = action_successes + [0]
+                        # print("y = ", y)
+                except IOError as ex:
+                    print('Error: Skipping file due to IO error when opening ' +
+                          example_filename + ': ' + str(ex) + ' using the last example twice for batch')
+
+            action_labels = np.array(action_labels)
+            init_images = preprocess_numpy_input(
+                np.array(init_images, dtype=np.float32),
+                data_format='channels_last', mode='tf')
+            current_images = preprocess_numpy_input(
+                np.array(current_images, dtype=np.float32),
+                data_format='channels_last', mode='tf')
+            poses = np.array(poses)
+
+            encoded_goal_pose = None
+            # print('encoded poses shape: ' + str(encoded_poses.shape))
+            # print('action labels shape: ' + str(action_labels.shape))
+            # print('encoded poses vec shape: ' + str(action_poses_vec.shape))
+            # print("---",init_images.shape)
+            # init_images = tf.image.resize_images(init_images,[224,224])
+            # current_images = tf.image.resize_images(current_images,[224,224])
+            # print("---",init_images.shape)
+            # X = init_images
+
+            X = encode_action_and_images(
+                data_features_to_extract=self.data_features_to_extract,
+                poses=poses, action_labels=action_labels,
+                init_images=init_images, current_images=current_images,
+                y=y, random_augmentation=self.random_encoding_augmentation)
+
+            # print("type=======",type(X))
+            # print("shape=====",X.shape)
+
+            # determine the label
+            if('stacking_reward' in self.label_features_to_extract):
+                y = encode_label(self.label_features_to_extract, y, action_successes, self.random_augmentation, current_stacking_reward)
+            else:
+                y = encode_label(self.label_features_to_extract, y, action_successes, self.random_augmentation, None)
+
+            # Debugging checks
+            if X is None:
+                raise ValueError('Unsupported input data for X: ' + str(x))
+            if y is None:
+                raise ValueError('Unsupported input data for y: ' + str(x))
+
+            # Assemble the data batch
+            batch = (X, y)
+
+            if self.verbose > 0:
+                # diff should be nonzero for most timesteps except just before the gripper closes!
+                print('encoded current poses: ' + str(poses) + ' labels: ' + str(y))
+                # commented next line due to dimension issue
+                # + ' diff: ' + str(poses - y))
+                print("generated batch: " + str(list_Ids))
+        except Exception as ex:
+            print('CostarBlockStackingDataset: Keras will often swallow exceptions without a stack trace, '
+                  'so we are printing the stack trace here before re-raising the error.')
+            ex_type, ex, tb = sys.exc_info()
+            traceback.print_tb(tb)
+            # deletion must be explicit to prevent leaks
+            # https://stackoverflow.com/a/16946886/99379
+            del tb
+            raise
+
+        return batch
+
+
+class BlockStackingSampler(Sampler):
+
+    def __init__(self, data_source):
+        self.data_source = data_source
+        self.epoch_size = len(data_source)
+        self.step = 0
+
+    def __iter__(self):
+        if self.step > self.epoch_size:
+            self.step = 0
+            self.data_source.on_epoch_end()
+        batch = self.data_source.__getitem__(self.step)
+        print(np.array(batch).shape)
+        print(np.array(batch[0][0]).shape)
+        exit()
+        self.step += 1
+        yield batch
+
+    def __len__(self):
+        return len(self.data_source)
 
 
 if __name__ == "__main__":
@@ -501,22 +949,22 @@ if __name__ == "__main__":
     filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/*success.h5f'))
     # print(filenames)
     # filenames_new = inference_mode_gen(filenames)
-    training_generator = CostarBlockStackingSequence(
+    costar_dataset = CostarBlockStackingDataset(
         filenames, batch_size=1, verbose=1,
         output_shape=output_shape,
         label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
         data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
         blend_previous_goal_images=False, inference_mode=False)
-    num_batches = len(training_generator)
+    num_batches = len(costar_dataset)
     print(num_batches)
     # print(len(filenames_new))
 
-    bsg = block_stacking_generator(training_generator)
-    iter(bsg)
+    block_stacking_sampler = BlockStackingSampler(costar_dataset)
+    iter(block_stacking_sampler)
     from tqdm import tqdm as tqdm
     progress = tqdm(range(num_batches))
     for i in progress:
-        data = next(bsg)
+        data = next(block_stacking_sampler)
         progress.set_description('step: ' + str(i) + ' data type: ' + str(type(data)))
 
         if visualize:
@@ -534,18 +982,15 @@ if __name__ == "__main__":
             # one window to be closed before showing the next
             # plt.show()
     # a = next(training_generator)
-    enqueuer = OrderedEnqueuer(
-                    training_generator,
-                    use_multiprocessing=False,
-                    shuffle=True)
-    enqueuer.start(workers=1, max_queue_size=1)
-    generator = iter(enqueuer.get())
+    generator = DataLoader(
+        costar_dataset, batch_size=1, shuffle=True, sampler=block_stacking_sampler,
+        num_workers=1)
     print("-------------------")
     generator_ouput = next(generator)
     print("-------------------op")
     x, y = generator_ouput
     print("x-shape-----------", x.shape)
-    print("y-shape---------",y.shape)
+    print("y-shape---------", y.shape)
 
     # X,y=training_generator.__getitem__(1)
     #print(X.keys())
