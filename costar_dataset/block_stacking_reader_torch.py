@@ -16,7 +16,6 @@ from numpy.random import RandomState
 # import json
 import hypertree_pose_metrics_torch as hypertree_pose_metrics
 from torch.utils.data import Dataset, DataLoader
-# from torch.utils.data.sampler import RandomSampler, SequentialSampler
 import scipy
 
 
@@ -309,7 +308,7 @@ def encode_action_and_images(
     encoded_poses = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
         poses, random_augmentation=random_augmentation)
     if data_features_to_extract is None or 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25':
-        # TODO(ahundt) This should actually encode two poses like the commented encoded_poses line below because it is for grasp proposal success/failure 
+        # TODO(ahundt) This should actually encode two poses like the commented encoded_poses line below because it is for grasp proposal success/failure
         # classification. First need to double check all code that uses it in enas and costar_plan
         encoded_goal_pose = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
             poses, random_augmentation=random_augmentation)
@@ -542,8 +541,6 @@ class CostarBlockStackingDataset(Dataset):
         # Arguments
 
         list_Ids: a list of file paths to be read
-        batch_size: specifies the size of each batch
-        shuffle: boolean to specify shuffle after each epoch
         seed: a random seed to use. If seed is None it will be in order!
         random_state: A numpy RandomState object, if not provided one will be generated from the seed.
             Used exclusively for example data ordering and the indices to visit within an example.
@@ -645,17 +642,6 @@ class CostarBlockStackingDataset(Dataset):
         Run extra steps in proportion to this if you want to get close to visiting every image.
         """
         return self.estimated_time_steps_per_example
-
-    # def on_epoch_end(self):
-    #     """ Updates indexes after each epoch
-    #     """
-    #     if self.seed is not None and not self.is_training:
-    #         # repeat the same order if we're validating or testing
-    #         # continue the large random sequence for training
-    #         self.random_state.seed(self.seed)
-    #     self.indexes = np.arange(len(self.list_example_filenames))
-    #     if self.shuffle is True:
-    #         self.random_state.shuffle(self.indexes)
 
     def __data_generation(self, data_path, images_index):
         """ Generates data containing batch_size samples
@@ -918,29 +904,6 @@ class CostarBlockStackingDataset(Dataset):
             raise
 
         return batch
-
-
-# class BlockStackingSampler(Sampler):
-
-#     def __init__(self, data_source):
-#         self.data_source = data_source
-#         self.epoch_size = len(data_source)
-#         self.step = 0
-
-#     def __iter__(self):
-#         while True:
-#             if self.step > self.epoch_size:
-#                 self.step = 0
-#                 self.data_source.on_epoch_end()
-#             batch = self.data_source.__getitem__(self.step)
-#             # print(np.array(batch).shape)
-#             # print(np.array(batch[0][0]).shape)
-#             # exit()
-#             self.step += 1
-#             yield batch
-
-#     def __len__(self):
-#         return len(self.data_source)
 
 
 if __name__ == "__main__":
