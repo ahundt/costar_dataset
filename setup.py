@@ -22,16 +22,16 @@ setup(
     author="Andrew Hundt",
     author_email="ATHundt@gmail.com",
 
-    description="Code for the The CoSTAR Block Stacking Dataset  includes a real robot trying to stack colored children's blocks. https://sites.google.com/site/costardataset",
-    long_description=read("README.rst"),
+    description="Code for the The CoSTAR Block Stacking Dataset which includes a real robot trying to stack colored children's blocks. https://sites.google.com/site/costardataset",
+    long_description=read("README.md"),
 
     packages=find_packages(exclude=('tests',)),
 
-    install_requires=[],
+    install_requires=['scikit-image', 'pywt', 'pyquaternion', 'scikit-learn'],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
-        'License :: OSI Approved :: MIT License',
+        'License :: OSI Approved :: Apache v2 License',
         'Programming Language :: Python',
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
