@@ -1,9 +1,14 @@
+#!/usr/bin/env python
 import io
 import os
 import re
 
 from setuptools import find_packages
 from setuptools import setup
+
+# Read version number from costar_dataset/__init__.py
+with open('costar_dataset/__init__.py') as f:
+    VERSION = re.search("__version__ = ['\"]([^'\"]+)['\"]", f.read()).group(1)
 
 
 def read(filename):
@@ -15,9 +20,9 @@ def read(filename):
 
 setup(
     name="costar_dataset",
-    version="0.4.0",
+    version=VERSION,
     url="https://sites.google.com/site/costardataset",
-    license='MIT',
+    license='Apache v2',
 
     author="Andrew Hundt",
     author_email="ATHundt@gmail.com",
@@ -27,11 +32,17 @@ setup(
 
     packages=find_packages(exclude=('tests',)),
 
-    install_requires=['scikit-image', 'pywt', 'pyquaternion', 'scikit-learn'],
+    install_requires=[
+        'scikit-image',
+        'pywt',
+        'pyquaternion',
+        'scikit-learn',
+        'h5py',
+        'tqdm'],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
-        'License :: OSI Approved :: Apache v2 License',
+        'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python',
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
