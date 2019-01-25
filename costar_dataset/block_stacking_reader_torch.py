@@ -924,7 +924,7 @@ if __name__ == "__main__":
     output_shape = (224, 224, 3)
     # output_shape = None
     # tf.enable_eager_execution()
-    filenames = glob.glob(os.path.expanduser('~/Documents/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
+    filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
     # print(filenames)
     # filenames_new = inference_mode_gen(filenames)
     costar_dataset = CostarBlockStackingDataset(
