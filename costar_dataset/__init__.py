@@ -2,4 +2,10 @@
 
 __version__ = '0.4.0'
 __author__ = 'Andrew Hundt <ATHundt@gmail.com>'
-__all__ = []
+
+from costar_dataset.block_stacking_reader_torch import CostarBlockStackingDataset
+
+__all__ = [
+    '__version__',
+    'CostarBlockStackingDataset'
+]

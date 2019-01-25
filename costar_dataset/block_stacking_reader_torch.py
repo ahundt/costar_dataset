@@ -14,7 +14,7 @@ from skimage.transform import resize
 import numpy as np
 from numpy.random import RandomState
 # import json
-import hypertree_pose_metrics_torch as hypertree_pose_metrics
+import costar_dataset.hypertree_pose_metrics_torch as hypertree_pose_metrics
 from torch.utils.data import Dataset, DataLoader
 import scipy
 

@@ -12,7 +12,7 @@ from shapely.geometry import Polygon
 from pyquaternion import Quaternion
 import sklearn
 
-import hypertree_utilities
+import costar_dataset.hypertree_utilities
 
 # class Vector:
 #     # http://www.mathopenref.com/coordpolygonarea.html

@@ -15,7 +15,7 @@ import keras
 from keras.utils import Sequence
 from keras.utils import OrderedEnqueuer
 import tensorflow as tf
-import hypertree_pose_metrics_tf as hypertree_pose_metrics
+import costar_dataset.hypertree_pose_metrics_tf as hypertree_pose_metrics
 import keras_applications
 import keras_preprocessing
 
