@@ -344,10 +344,6 @@ def encode_action_and_images(
     else:
         raise ValueError('Unsupported data input: ' + str(data_features_to_extract))
 
-    print(len(X))
-    for i in range(len(X)):
-        print("{}: {}".format(i, X[i].shape))
-
     if (data_features_to_extract is not None and
             ('image_0_image_n_vec_xyz_10' in data_features_to_extract or
              'image_0_image_n_vec_xyz_aaxyz_nsc_15' in data_features_to_extract or
