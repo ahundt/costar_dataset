@@ -344,6 +344,10 @@ def encode_action_and_images(
     else:
         raise ValueError('Unsupported data input: ' + str(data_features_to_extract))
 
+    print(len(X))
+    for i in range(len(X)):
+        print("{}: {}".format(i, X[i].shape))
+
     if (data_features_to_extract is not None and
             ('image_0_image_n_vec_xyz_10' in data_features_to_extract or
              'image_0_image_n_vec_xyz_aaxyz_nsc_15' in data_features_to_extract or
@@ -351,7 +355,9 @@ def encode_action_and_images(
              'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' in data_features_to_extract or
              'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in data_features_to_extract)):
         # make the giant data cube if it is requested
-        vec = np.squeeze(X[2:])
+        # HACK(rexxarchl): in torch, batch size is controlled by DataLoader whereas in tf batch size is written in Sequence
+        #                  therefore, reshape this to always be (1, num_channels)
+        vec = np.squeeze(X[2:]).reshape((1, -1))
         assert len(vec.shape) == 2, 'we only support a 2D input vector for now but found shape:' + str(vec.shape)
         X = concat_images_with_tiled_vector_np(X[:2], vec)
 
@@ -885,6 +891,17 @@ class CostarBlockStackingDataset(Dataset):
                 raise ValueError('Unsupported input data for y: ' + str(x))
 
             # Assemble the data batch
+            # HACK(rexxarchl): Squeeze to match the output from tensorflow
+            if isinstance(X, list):
+                X = [np.squeeze(X[i]) for i in range(len(X))]
+            else:
+                X = np.squeeze(X)
+
+            if isinstance(y, list):
+                y = [np.squeeze(y[i]) for i in range(len(y))]
+            else:
+                y = np.squeeze(y)
+
             batch = (X, y)
 
             if self.verbose > 0:
@@ -911,23 +928,26 @@ if __name__ == "__main__":
     output_shape = (224, 224, 3)
     # output_shape = None
     # tf.enable_eager_execution()
-    filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
+    filenames = glob.glob(os.path.expanduser('~/Documents/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
     # print(filenames)
     # filenames_new = inference_mode_gen(filenames)
     costar_dataset = CostarBlockStackingDataset(
         filenames, verbose=1,
         output_shape=output_shape,
         label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
-        data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
+        # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
+        data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
         blend_previous_goal_images=False, inference_mode=False)
     num_batches = len(costar_dataset)
     print(num_batches)
 
-    generator = DataLoader(costar_dataset, batch_size=1, shuffle=True, num_workers=1)
+    generator = DataLoader(costar_dataset, batch_size=3, shuffle=True, num_workers=1)
 
     for generator_output in generator:
         print("-------------------op")
         x, y = generator_output
+        print(x.shape)
+        print(y.shape)
 
         for i, data in enumerate(x):
             print("x[{}]: ".format(i) + str(data.shape))
