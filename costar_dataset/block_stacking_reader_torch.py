@@ -18,6 +18,10 @@ import costar_dataset.hypertree_pose_metrics_torch as hypertree_pose_metrics
 from torch.utils.data import Dataset, DataLoader
 import scipy
 
+COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy']
+COSTAR_SUBSET_NAMES = ['success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure']
+COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward']
+
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
     """ Cutout and random erasing algorithms for data augmentation
@@ -631,6 +635,11 @@ class CostarBlockStackingDataset(Dataset):
                         force_random_training_pose_augmentation=None):
         '''Call constructor from specified parameter
         '''
+        if set_name not in COSTAR_SET_NAMES:
+            raise ValueError("Specify costar_set_name as one of {'blocks_only', 'blocks_with_plush_toy'}")
+        if subset_name not in COSTAR_SUBSET_NAMES:
+            raise ValueError("Specify costar_subset_name as one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}")
+
         txt_filename = 'costar_block_stacking_dataset_{0}_{1}_{2}_{3}_files.txt'.format(version, set_name, subset_name, split)
         txt_filename = os.path.expanduser(os.path.join(root, set_name, txt_filename))
         if verbose > 0:
@@ -639,8 +648,9 @@ class CostarBlockStackingDataset(Dataset):
         with open(txt_filename, 'r') as f:
             data_filenames = f.read().splitlines()
 
-        if feature_mode is None:
+        if feature_mode not in COSTAR_FEATURE_MODES:
             if verbose > 0:
+                print("Unknown feature mode: {}".format(feature_mode))
                 print("Using the original input block as the features")
             data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17']
             label_features = ['grasp_goal_xyz_aaxyz_nsc_8']
