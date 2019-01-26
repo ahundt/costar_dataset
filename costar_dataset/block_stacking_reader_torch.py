@@ -618,6 +618,61 @@ class CostarBlockStackingDataset(Dataset):
         if self.inference_mode is True:
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
 
+    @classmethod
+    def from_parameters(cls, root, version, set_name, subset_name, split, feature_mode=None,
+                        total_actions_available=41,
+                        seed=0, random_state=None,
+                        is_training=True, random_augmentation=None,
+                        random_shift=False,
+                        output_shape=None,
+                        blend_previous_goal_images=False,
+                        estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
+                        pose_name='pose_gripper_center',
+                        force_random_training_pose_augmentation=None):
+        '''Call constructor from specified parameter
+        '''
+        txt_filename = 'costar_block_stacking_dataset_{0}_{1}_{2}_{3}_files.txt'.format(version, set_name, subset_name, split)
+        txt_filename = os.path.expanduser(os.path.join(root, set_name, txt_filename))
+        if verbose > 0:
+            print("Loading {0} filenames from txt files: \n\t{1}".format(split, txt_filename))
+
+        with open(txt_filename, 'r') as f:
+            data_filenames = f.read().splitlines()
+
+        if feature_mode is None:
+            if verbose > 0:
+                print("Using the original input block as the features")
+            data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17']
+            label_features = ['grasp_goal_xyz_aaxyz_nsc_8']
+        else:
+            if verbose > 0:
+                print("Using feature mode: " + feature_mode)
+            if feature_mode == 'translation_only':
+                data_features = ['image_0_image_n_vec_xyz_nxygrid_12']
+                label_features = ['grasp_goal_xyz_3']
+            elif feature_mode == 'rotation_only':
+                data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_15']
+                label_features = ['grasp_goal_aaxyz_nsc_5']
+            elif feature_mode == 'stacking_reward':
+                data_features = ['image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25']
+                label_features = ['stacking_reward']
+
+        data = cls(
+            data_filenames,
+            label_features_to_extract=label_features, data_features_to_extract=data_features,
+            total_actions_available=total_actions_available,
+            seed=seed, random_state=random_state,
+            is_training=is_training, random_augmentation=random_augmentation,
+            random_shift=random_shift,
+            output_shape=output_shape,
+            blend_previous_goal_images=blend_previous_goal_images,
+            estimated_time_steps_per_example=estimated_time_steps_per_example, 
+            verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
+            pose_name=pose_name,
+            force_random_training_pose_augmentation=force_random_training_pose_augmentation)
+
+        return data
+
     def __len__(self):
         """Return the lenth of file names
         """
