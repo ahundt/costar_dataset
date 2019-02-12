@@ -959,6 +959,8 @@ class CostarBlockStackingDataset(Dataset):
             else:
                 X = np.squeeze(X)
 
+            X = np.moveaxis(X, 2, 0)  # Switch to channel-first format as per torch convention
+
             if isinstance(y, list):
                 y = [np.squeeze(y[i]) for i in range(len(y))]
             else:
