@@ -636,9 +636,9 @@ class CostarBlockStackingDataset(Dataset):
         '''Call constructor from specified parameter
         '''
         if set_name not in COSTAR_SET_NAMES:
-            raise ValueError("Specify costar_set_name as one of {'blocks_only', 'blocks_with_plush_toy'}")
+            raise ValueError("CostarBlockStackingDataset: Specify costar_set_name as one of {'blocks_only', 'blocks_with_plush_toy'}")
         if subset_name not in COSTAR_SUBSET_NAMES:
-            raise ValueError("Specify costar_subset_name as one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}")
+            raise ValueError("CostarBlockStackingDataset: Specify costar_subset_name as one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}")
 
         txt_filename = 'costar_block_stacking_dataset_{0}_{1}_{2}_{3}_files.txt'.format(version, set_name, subset_name, split)
         txt_filename = os.path.expanduser(os.path.join(root, set_name, txt_filename))
@@ -650,13 +650,14 @@ class CostarBlockStackingDataset(Dataset):
 
         if feature_mode not in COSTAR_FEATURE_MODES:
             if verbose > 0:
-                print("Unknown feature mode: {}".format(feature_mode))
-                print("Using the original input block as the features")
+                print("Using feature mode: " + feature_mode)
+                if feature_mode != 'original_block':
+                    print("Unknown feature mode: {}".format(feature_mode))
+                    print("Using the original input block as the features")
             data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17']
             label_features = ['grasp_goal_xyz_aaxyz_nsc_8']
         else:
-            if verbose > 0:
-                print("Using feature mode: " + feature_mode)
+            
             if feature_mode == 'translation_only':
                 data_features = ['image_0_image_n_vec_xyz_nxygrid_12']
                 label_features = ['grasp_goal_xyz_3']
@@ -772,7 +773,7 @@ class CostarBlockStackingDataset(Dataset):
                     raise ValueError('CostarBlockStackingDataset: Trying to open something which is not a file: ' + str(example_filename))
                 with h5py.File(example_filename, 'r') as data:
                     if 'gripper_action_goal_idx' not in data or 'gripper_action_label' not in data:
-                        raise ValueError('block_stacking_reader.py: You need to run preprocessing before this will work! \n' +
+                        raise ValueError('CostarBlockStackingDataset: You need to run preprocessing before this will work! \n' +
                                          '    python2 ctp_integration/scripts/view_convert_dataset.py --path ~/.keras/datasets/costar_block_stacking_dataset_v0.4 --preprocess_inplace gripper_action --write'
                                          '\n File with error: ' + str(example_filename))
                     # indices = [0]
