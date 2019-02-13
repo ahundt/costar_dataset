@@ -10,7 +10,7 @@ from tqdm import tqdm
 import torch
 from shapely.geometry import Polygon
 from pyquaternion import Quaternion
-import sklearn
+from sklearn import preprocessing
 
 import costar_dataset.hypertree_utilities
 
@@ -509,7 +509,7 @@ def normalize_sin_theta_cos_theta(sin_theta, cos_theta):
     Output values will be in (-1, 1).
     normalize the prediction but keep the vector direction the same
     """
-    arr = sklearn.preprocessing.normalize(np.array([[sin_theta, cos_theta]], dtype=np.float))
+    arr = preprocessing.normalize(np.array([[sin_theta, cos_theta]], dtype=np.float))
     sin_theta = arr[0, 0]
     cos_theta = arr[0, 1]
     return sin_theta, cos_theta
@@ -802,7 +802,7 @@ def normalize_axis(aaxyz, epsilon=1e-5, verbose=0):
         # source: https://stackoverflow.com/a/23567941/99379
         # we checked if all values are zero, fix missing axis
         aaxyz[-1] += epsilon
-    arr = sklearn.preprocessing.normalize(np.array([aaxyz], dtype=np.float))
+    arr = preprocessing.normalize(np.array([aaxyz], dtype=np.float))
     aaxyz = np.squeeze(arr[0, :])
     if verbose:
         print('normalize_axis: ' + str(aaxyz))
