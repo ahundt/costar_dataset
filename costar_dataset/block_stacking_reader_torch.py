@@ -10,6 +10,7 @@ import glob
 import traceback
 from PIL import Image
 from skimage.transform import resize
+import warnings
 
 import numpy as np
 from numpy.random import RandomState
@@ -770,6 +771,8 @@ class CostarBlockStackingDataset(Dataset):
             if format == 'numpy':
                 imgs = np.array(imgs)
             return imgs
+
+        warnings.simplefilter('ignore')  # Ignore skimage warnings on anti-aliasing
         try:
             # Initialization
             if self.verbose > 0:
