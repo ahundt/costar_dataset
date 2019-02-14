@@ -802,7 +802,7 @@ def normalize_axis(aaxyz, epsilon=1e-5, verbose=0):
         # source: https://stackoverflow.com/a/23567941/99379
         # we checked if all values are zero, fix missing axis
         aaxyz[-1] += epsilon
-    arr = preprocessing.normalize(np.array([aaxyz], dtype=np.float))
+    arr = preprocessing.normalize(np.array(aaxyz, dtype=np.float).reshape(1, -1))
     aaxyz = np.squeeze(arr[0, :])
     if verbose:
         print('normalize_axis: ' + str(aaxyz))
