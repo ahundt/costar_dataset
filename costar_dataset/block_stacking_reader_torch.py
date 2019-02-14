@@ -633,12 +633,35 @@ class CostarBlockStackingDataset(Dataset):
                         estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
                         pose_name='pose_gripper_center',
                         force_random_training_pose_augmentation=None):
-        '''Call constructor from specified parameter
+        '''
+        Calls the class constructor from specified parameter.
+        This function saves the hussle and redundant code of opening and reading respective filename txt for different dataset splits.
+        The function will open the filename txt according to the specified parameter, reading in all the filenames, and then call 
+        constructor for the dataset for the loader.
+
+        The following parameters are specific to this function. Other parameters follow that of the class constructor. See the docstring 
+        for __init__ for details.
+        :param root: The root directory for the costar dataset.
+        :param version: The CoSTAR Dataset version, as is used in the filename txt files.
+        :param set_name: The set that will be loaded. Currently one of {'blocks_only', 'blocks_with_plush_toy'}.
+        :param subset_name: The subset that will be loaded. 
+                            Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
+        :param split: The split that will be loaded. One of {'train', 'test', 'val'}
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'original_block'}. Correspond to different 
+                             feature combos that the returned data will have. If leave blank, will default to 'original_block'
+                             Feature combo and their corresponding data and label features:
+                             - 'original_block': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
+                             - 'translation_only': data = 'image_0_image_n_vec_xyz_nxygrid_12', label = 'grasp_goal_xyz_3'
+                             - 'rotation_only': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_15', label = 'grasp_goal_aaxyz_nsc_5'
+                             - 'stacking_reward': data = 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25', label = 'stacking_reward'
+                             See the docstring for __init__ for details on data_features_to_extract and label_features_to_extract.
+        :return: The class object for CostarBlockStackingDataset that can be fed into a DataLoader of choice to get train/test/val queues.
         '''
         if set_name not in COSTAR_SET_NAMES:
             raise ValueError("CostarBlockStackingDataset: Specify costar_set_name as one of {'blocks_only', 'blocks_with_plush_toy'}")
         if subset_name not in COSTAR_SUBSET_NAMES:
-            raise ValueError("CostarBlockStackingDataset: Specify costar_subset_name as one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}")
+            raise ValueError("CostarBlockStackingDataset: Specify costar_subset_name as one of "
+                             "{'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}")
 
         txt_filename = 'costar_block_stacking_dataset_{0}_{1}_{2}_{3}_files.txt'.format(version, set_name, subset_name, split)
         txt_filename = os.path.expanduser(os.path.join(root, set_name, txt_filename))
