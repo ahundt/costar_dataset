@@ -1380,3 +1380,47 @@ def grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_ns
         accuracies.append(one_accuracy)
     accuracies = np.array(accuracies, np.float32)
     return accuracies
+
+
+# Python 3.6+ maintains dictionary insertion order by default
+GRASP_ACCURACY_METRICS = {
+    'grasp_acc_5mm_7_5deg': grasp_acc_5mm_7_5deg,
+    'grasp_acc_1cm_15deg': grasp_acc_1cm_15deg,
+    'grasp_acc_2cm_30deg': grasp_acc_2cm_30deg,
+    'grasp_acc_4cm_60deg': grasp_acc_4cm_60deg,
+    'grasp_acc_8cm_120deg': grasp_acc_8cm_120deg,
+    'grasp_acc_16cm_240deg': grasp_acc_16cm_240deg,
+    'grasp_acc_32cm_360deg': grasp_acc_32cm_360deg,
+    'grasp_acc_64cm_360deg': grasp_acc_64cm_360deg,
+    'grasp_acc_128cm_360deg': grasp_acc_128cm_360deg,
+    'grasp_acc_256cm_360deg': grasp_acc_256cm_360deg,
+    'grasp_acc_512cm_360deg': grasp_acc_256cm_360deg
+}
+
+
+def grasp_acc_in_bins_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc):
+    """ Calculate 3D grasp accuracy for a batch of results according to progressively increasing thresholds.
+    :return: A dictionary with the keys being metric names and values being the percentage of the samples in the metric threshold.
+    """
+    batch_size = len(y_true_xyz_aaxyz_nsc)
+    visited = np.zeros(batch_size, dtype=bool)
+    counter = {}
+
+    # Python 3.6+ maintains dictionary insertion order by default, so this call will have increasing threshold functions
+    for metric_name, metric_fn in GRASP_ACCURACY_METRICS.items():
+        if np.all(visited):  # All samples in the batch are visited
+            # Fill the rest of the metrics with count = 0
+            counter[metric_name] = '0.000'
+            continue
+
+        # metric_fn return 1 if the sample is in the range and 0 otherwise
+        results = metric_fn(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
+
+        samples_in_range = np.sum(results) - np.sum(visited)  # Count the number of samples in the range
+        counter[metric_name] = '{:.3f}'.format(samples_in_range / batch_size)  # Record the percentage of samples in the range
+        visited[np.where(results)] = True  # Indicate the samples already in the range
+
+    if len(counter) != len(GRASP_ACCURACY_METRICS):  # Sanity check
+        raise ValueError("grasp_acc_in_bins_batch: counter and metrics length mismatch! len(counter) = {}, len(metrics) = {}".format)
+
+    return counter

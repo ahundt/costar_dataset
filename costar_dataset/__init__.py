@@ -5,7 +5,7 @@ __author__ = 'Andrew Hundt <ATHundt@gmail.com>'
 
 try:
     from costar_dataset.block_stacking_reader_torch import CostarBlockStackingDataset
-    from costar_dataset.hypertree_pose_metrics_torch import absolute_cart_distance_xyz_aaxyz_nsc_batch, absolute_angle_distance_xyz_aaxyz_nsc_batch
+    from costar_dataset.hypertree_pose_metrics_torch import cart_error, angle_error, grasp_acc_in_bins_batch
 except ImportError:
     print("Torch not installed.")
 
@@ -16,6 +16,7 @@ __all__ = [
     'CostarBlockStackingDataset',
 
     # API
-    'absolute_cart_distance_xyz_aaxyz_nsc_batch',
-    'absolute_angle_distance_xyz_aaxyz_nsc_batch'
+    'cart_error',
+    'angle_error',
+    'grasp_acc_in_bins_batch'
 ]
