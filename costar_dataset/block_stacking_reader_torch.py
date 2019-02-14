@@ -648,10 +648,10 @@ class CostarBlockStackingDataset(Dataset):
         :param subset_name: The subset that will be loaded. 
                             Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
         :param split: The split that will be loaded. One of {'train', 'test', 'val'}
-        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'original_block'}. Correspond to different 
-                             feature combos that the returned data will have. If leave blank, will default to 'original_block'
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different 
+                             feature combos that the returned data will have. If leave blank, will default to 'all_features'
                              Feature combo and their corresponding data and label features:
-                             - 'original_block': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
+                             - 'all_features': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
                              - 'translation_only': data = 'image_0_image_n_vec_xyz_nxygrid_12', label = 'grasp_goal_xyz_3'
                              - 'rotation_only': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_15', label = 'grasp_goal_aaxyz_nsc_5'
                              - 'stacking_reward': data = 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25', label = 'stacking_reward'
@@ -675,7 +675,7 @@ class CostarBlockStackingDataset(Dataset):
         if feature_mode not in COSTAR_FEATURE_MODES:
             if verbose > 0:
                 print("Using feature mode: " + feature_mode)
-                if feature_mode != 'original_block':
+                if feature_mode != 'all_features':
                     print("Unknown feature mode: {}".format(feature_mode))
                     print("Using the original input block as the features")
             data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17']
