@@ -60,12 +60,6 @@ import moviepy
 import moviepy.editor as mpye
 # import skimage
 try:
-    # don't require tensorflow for viewing
-    import tensorflow as tf
-except ImportError:
-    tf = None
-
-try:
     import eigen
     import sva
 except ImportError:
@@ -153,11 +147,8 @@ def GetPng(img):
 
 
 def JpegToNumpy(jpeg):
-    if tf is not None:
-        image = tf.image.decode_jpeg(jpeg)
-    else:
-        stream = io.BytesIO(jpeg)
-        image = Image.open(stream)
+    stream = io.BytesIO(jpeg)
+    image = Image.open(stream)
     return np.asarray(image, dtype=np.uint8)
 
 
@@ -626,7 +617,7 @@ def main(args, root="root"):
                     # Check dependency
                     if sva == None or eigen == None:
                         raise ValueError(
-                            'Trying to do tf calculation, but sva or eigen is not available!'
+                            'Trying to do rigid transform calculation, but sva or eigen is not available!'
                             'To install run the script at'
                             'https://github.com/ahundt/robotics_setup/blob/master/robotics_tasks.sh'
                             'or follow the instructions at https://github.com/jrl-umi3218/Eigen3ToPython'
@@ -649,7 +640,7 @@ def main(args, root="root"):
                         gripper_center_poses[i] = ptransform_to_vector_quaternion_array(tf_gripper_center)
 
                         # uncomment for verbose output
-                        #progress_bar.write(
+                        # progress_bar.write(
                         #    'Processed datapoint[' + str(i) + ']: ' +
                         #    '\nee_link = ' + str(ee_link_poses[i]) +
                         #    '\ngripper_center = ' + str(gripper_center_poses[i])
@@ -1000,9 +991,6 @@ def action_label_check(action_labels, stored_action_labels=None):
         # raise ValueError("WARNING! Inconsistent action labels detected")
 
 
-
 if __name__ == "__main__":
-    if tf is not None:
-        tf.enable_eager_execution()
     args = _parse_args()
     main(args)
