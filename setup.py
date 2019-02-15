@@ -38,7 +38,11 @@ setup(
         'pyquaternion',
         'scikit-learn',
         'h5py',
-        'tqdm'],
+        'tqdm',
+        'PIL',  # TODO(rexxarchl): or pillow?
+        'moviepy',
+        'pygame',
+        'matplotlib'],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
