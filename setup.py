@@ -39,7 +39,7 @@ setup(
         'scikit-learn',
         'h5py',
         'tqdm',
-        'PIL',  # TODO(rexxarchl): or pillow?
+        'pillow',
         'moviepy',
         'pygame',
         'matplotlib'],
