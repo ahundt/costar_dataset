@@ -624,23 +624,25 @@ class CostarBlockStackingDataset(Dataset):
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
 
     @classmethod
-    def from_parameters(cls, root, version, set_name, subset_name, split, feature_mode=None,
-                        total_actions_available=41,
-                        seed=0, random_state=None,
-                        is_training=True, random_augmentation=None,
-                        random_shift=False,
-                        output_shape=None,
-                        blend_previous_goal_images=False,
-                        estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
-                        pose_name='pose_gripper_center',
-                        force_random_training_pose_augmentation=None):
+    def from_standard_txt(cls, root, version, set_name, subset_name, split, feature_mode=None,
+                          total_actions_available=41,
+                          seed=0, random_state=None,
+                          is_training=True, random_augmentation=None,
+                          random_shift=False,
+                          output_shape=None,
+                          blend_previous_goal_images=False,
+                          estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
+                          pose_name='pose_gripper_center',
+                          force_random_training_pose_augmentation=None):
         '''
-        Calls the class constructor from specified parameter.
-        This function saves the hussle and redundant code of opening and reading respective filename txt for different dataset splits.
-        The function will open the filename txt according to the specified parameter, reading in all the filenames, and then call 
-        constructor for the dataset for the loader.
+        Loads the filenames from specified set, subset and split from the standard txt files.
+        Since CoSTAR BSD v0.4, the names for the .txt files that stores filenames for train/val/test splits are in standardized.
+        For example, if you want to train the network in v0.4 blocks_only set, success_only subset, the txt file is called
+        "costar_block_stacking_dataset_v0.4_blocks_only_success_only_train_files.txt".
+        This function opens the standard txt files and create the Dataset object using the filenames in the txt file.
+        The returned Dataset object can later be used in a DataLoader of choice to create a queue for train/val/test purposes.
 
-        The following parameters are specific to this function. Other parameters follow that of the class constructor. See the docstring 
+        The following parameters are specific to this function. Other parameters follow that of the class constructor. See the docstring
         for __init__ for details.
         :param root: The root directory for the costar dataset.
         :param version: The CoSTAR Dataset version, as is used in the filename txt files.
@@ -648,7 +650,7 @@ class CostarBlockStackingDataset(Dataset):
         :param subset_name: The subset that will be loaded. 
                             Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
         :param split: The split that will be loaded. One of {'train', 'test', 'val'}
-        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different 
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different
                              feature combos that the returned data will have. If leave blank, will default to 'all_features'
                              Feature combo and their corresponding data and label features:
                              - 'all_features': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
@@ -681,7 +683,6 @@ class CostarBlockStackingDataset(Dataset):
             data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17']
             label_features = ['grasp_goal_xyz_aaxyz_nsc_8']
         else:
-            
             if feature_mode == 'translation_only':
                 data_features = ['image_0_image_n_vec_xyz_nxygrid_12']
                 label_features = ['grasp_goal_xyz_3']
