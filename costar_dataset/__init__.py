@@ -12,7 +12,7 @@ except ImportError:
     print("PyTorch is not installed. Skipping torch related imports")
 
 try:
-    import tf
+    import tensorflow as tf
     _backend = 'tf'
 except ImportError:
     print("Tensorflow is not installed. Skipping tf related imports")
