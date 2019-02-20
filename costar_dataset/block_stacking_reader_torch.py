@@ -540,7 +540,7 @@ class CostarBlockStackingDataset(Dataset):
                  random_shift=False,
                  output_shape=None,
                  blend_previous_goal_images=False,
-                 estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
+                 num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                  pose_name='pose_gripper_center',
                  force_random_training_pose_augmentation=None):
         '''Initialization
@@ -560,10 +560,11 @@ class CostarBlockStackingDataset(Dataset):
             'image_0_image_n_vec_xyz_nxygrid_12' another giant cube without rotation and with explicit normalized xy coordinates,
             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' another giant cube with rotation and explicit normalized xy coordinates.
         random_augmentation: None or a float value between 0 and 1 indiciating how frequently random augmentation should be applied.
-        estimated_time_steps_per_example: The number of images in each example varies,
-            so we simply sample in proportion to an estimated number of images per example.
+        num_images_per_example: The number of images in each example varies, so we simply sample in proportion to an estimated number
+            of images per example. Set this number high if you want to visit more images in the same example.
+            The data loader will visit each example `num_images_per_example` times, where the default is 200.
             Due to random sampling, there is no guarantee that every image will be visited once!
-            However, the images can be visited in a fixed order, particularly when is_training=False.
+            The images can also be visited in a fixed order, particularly when is_training=False.
         one_hot_encoding flag triggers one hot encoding and thus numbers at the end of labels might not correspond to the actual size.
         force_random_training_pose_augmentation: override random_augmenation when training for pose data only.
         pose_name: Which pose to use as the robot 3D position in space. Options include:
@@ -619,7 +620,7 @@ class CostarBlockStackingDataset(Dataset):
                 self.random_encoding_augmentation = force_random_training_pose_augmentation
 
         self.blend = blend_previous_goal_images
-        self.estimated_time_steps_per_example = estimated_time_steps_per_example
+        self.num_images_per_example = num_images_per_example
         if self.inference_mode is True:
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
 
@@ -631,7 +632,7 @@ class CostarBlockStackingDataset(Dataset):
                           random_shift=False,
                           output_shape=None,
                           blend_previous_goal_images=False,
-                          estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
+                          num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                           pose_name='pose_gripper_center',
                           force_random_training_pose_augmentation=None):
         '''
@@ -647,7 +648,7 @@ class CostarBlockStackingDataset(Dataset):
         :param root: The root directory for the costar dataset.
         :param version: The CoSTAR Dataset version, as is used in the filename txt files.
         :param set_name: The set that will be loaded. Currently one of {'blocks_only', 'blocks_with_plush_toy'}.
-        :param subset_name: The subset that will be loaded. 
+        :param subset_name: The subset that will be loaded.
                             Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
         :param split: The split that will be loaded. One of {'train', 'test', 'val'}
         :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different
@@ -702,7 +703,7 @@ class CostarBlockStackingDataset(Dataset):
             random_shift=random_shift,
             output_shape=output_shape,
             blend_previous_goal_images=blend_previous_goal_images,
-            estimated_time_steps_per_example=estimated_time_steps_per_example, 
+            num_images_per_example=num_images_per_example,
             verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
             pose_name=pose_name,
             force_random_training_pose_augmentation=force_random_training_pose_augmentation)
@@ -712,7 +713,7 @@ class CostarBlockStackingDataset(Dataset):
     def __len__(self):
         """Return the lenth of file names
         """
-        return len(self.list_example_filenames)
+        return len(self.list_example_filenames) * self.num_images_per_example
 
     def __getitem__(self, index):
         '''Generate one example of data
@@ -725,16 +726,16 @@ class CostarBlockStackingDataset(Dataset):
         # list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
         # Generate data
         self.infer_index = self.infer_index + 1
-        X, y = self.__data_generation(self.list_example_filenames[index], self.infer_index)
+        X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
 
         return X, y
 
-    def get_estimated_time_steps_per_example(self):
-        """ Get the estimated images per example,
-
-        Run extra steps in proportion to this if you want to get close to visiting every image.
+    def get_num_images_per_example(self):
+        """ Get the estimated images per example.
+        Note that the data loader already visit samples this many times.
+        Run extra steps in proportion to this if you want to visit even more images per sample.
         """
-        return self.estimated_time_steps_per_example
+        return self.num_images_per_example
 
     def __data_generation(self, data_path, images_index):
         """ Generates data containing batch_size samples
@@ -980,7 +981,9 @@ class CostarBlockStackingDataset(Dataset):
                 raise ValueError('Unsupported input data for y: ' + str(x))
 
             # Assemble the data batch
-            # HACK(rexxarchl): Squeeze to match the output from tensorflow
+            # HACK(rexxarchl): tf process the data in batches, while torch process one-by-one.
+            #                  Therefore, while tf outputs (batch, 224, 224, 57) tensors, torch will output (batch, 1, 224, 224, 57)
+            #                  Use squeeze to eliminate the redundant dimensions with depth of 1.
             if isinstance(X, list):
                 X = [np.squeeze(X[i]) for i in range(len(X))]
             else:
@@ -1029,10 +1032,9 @@ if __name__ == "__main__":
         # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
         data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
         blend_previous_goal_images=False, inference_mode=False)
-    num_batches = len(costar_dataset)
-    print(num_batches)
 
-    generator = DataLoader(costar_dataset, batch_size=3, shuffle=True, num_workers=1)
+    generator = DataLoader(costar_dataset, batch_size=128, shuffle=True, num_workers=1)
+    print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
     for generator_output in generator:
         print("-------------------op")
