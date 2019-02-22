@@ -42,7 +42,8 @@ setup(
         'pillow',
         'moviepy',
         'pygame',
-        'matplotlib'],
+        'matplotlib',
+        'shapely'],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
