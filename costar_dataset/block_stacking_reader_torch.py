@@ -10,13 +10,18 @@ import glob
 import traceback
 from PIL import Image
 from skimage.transform import resize
+import warnings
 
 import numpy as np
 from numpy.random import RandomState
 # import json
-import hypertree_pose_metrics_torch as hypertree_pose_metrics
+import costar_dataset.hypertree_pose_metrics_torch as hypertree_pose_metrics
 from torch.utils.data import Dataset, DataLoader
 import scipy
+
+COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy']
+COSTAR_SUBSET_NAMES = ['success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure']
+COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward']
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -351,7 +356,9 @@ def encode_action_and_images(
              'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' in data_features_to_extract or
              'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in data_features_to_extract)):
         # make the giant data cube if it is requested
-        vec = np.squeeze(X[2:])
+        # HACK(rexxarchl): in torch, batch size is controlled by DataLoader whereas in tf batch size is written in Sequence
+        #                  therefore, reshape this to always be (1, num_channels)
+        vec = np.squeeze(X[2:]).reshape((1, -1))
         assert len(vec.shape) == 2, 'we only support a 2D input vector for now but found shape:' + str(vec.shape)
         X = concat_images_with_tiled_vector_np(X[:2], vec)
 
@@ -533,7 +540,7 @@ class CostarBlockStackingDataset(Dataset):
                  random_shift=False,
                  output_shape=None,
                  blend_previous_goal_images=False,
-                 estimated_time_steps_per_example=250, verbose=0, inference_mode=False, one_hot_encoding=True,
+                 num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                  pose_name='pose_gripper_center',
                  force_random_training_pose_augmentation=None):
         '''Initialization
@@ -553,10 +560,11 @@ class CostarBlockStackingDataset(Dataset):
             'image_0_image_n_vec_xyz_nxygrid_12' another giant cube without rotation and with explicit normalized xy coordinates,
             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' another giant cube with rotation and explicit normalized xy coordinates.
         random_augmentation: None or a float value between 0 and 1 indiciating how frequently random augmentation should be applied.
-        estimated_time_steps_per_example: The number of images in each example varies,
-            so we simply sample in proportion to an estimated number of images per example.
+        num_images_per_example: The number of images in each example varies, so we simply sample in proportion to an estimated number
+            of images per example. Set this number high if you want to visit more images in the same example.
+            The data loader will visit each example `num_images_per_example` times, where the default is 200.
             Due to random sampling, there is no guarantee that every image will be visited once!
-            However, the images can be visited in a fixed order, particularly when is_training=False.
+            The images can also be visited in a fixed order, particularly when is_training=False.
         one_hot_encoding flag triggers one hot encoding and thus numbers at the end of labels might not correspond to the actual size.
         force_random_training_pose_augmentation: override random_augmenation when training for pose data only.
         pose_name: Which pose to use as the robot 3D position in space. Options include:
@@ -612,14 +620,100 @@ class CostarBlockStackingDataset(Dataset):
                 self.random_encoding_augmentation = force_random_training_pose_augmentation
 
         self.blend = blend_previous_goal_images
-        self.estimated_time_steps_per_example = estimated_time_steps_per_example
+        self.num_images_per_example = num_images_per_example
         if self.inference_mode is True:
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
+
+    @classmethod
+    def from_standard_txt(cls, root, version, set_name, subset_name, split, feature_mode=None,
+                          total_actions_available=41,
+                          seed=0, random_state=None,
+                          is_training=True, random_augmentation=None,
+                          random_shift=False,
+                          output_shape=None,
+                          blend_previous_goal_images=False,
+                          num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
+                          pose_name='pose_gripper_center',
+                          force_random_training_pose_augmentation=None):
+        '''
+        Loads the filenames from specified set, subset and split from the standard txt files.
+        Since CoSTAR BSD v0.4, the names for the .txt files that stores filenames for train/val/test splits are in standardized.
+        For example, if you want to train the network in v0.4 blocks_only set, success_only subset, the txt file is called
+        "costar_block_stacking_dataset_v0.4_blocks_only_success_only_train_files.txt".
+        This function opens the standard txt files and create the Dataset object using the filenames in the txt file.
+        The returned Dataset object can later be used in a DataLoader of choice to create a queue for train/val/test purposes.
+
+        The following parameters are specific to this function. Other parameters follow that of the class constructor. See the docstring
+        for __init__ for details.
+        :param root: The root directory for the costar dataset.
+        :param version: The CoSTAR Dataset version, as is used in the filename txt files.
+        :param set_name: The set that will be loaded. Currently one of {'blocks_only', 'blocks_with_plush_toy'}.
+        :param subset_name: The subset that will be loaded.
+                            Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
+        :param split: The split that will be loaded. One of {'train', 'test', 'val'}
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different
+                             feature combos that the returned data will have. If leave blank, will default to 'all_features'
+                             Feature combo and their corresponding data and label features:
+                             - 'all_features': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
+                             - 'translation_only': data = 'image_0_image_n_vec_xyz_nxygrid_12', label = 'grasp_goal_xyz_3'
+                             - 'rotation_only': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_15', label = 'grasp_goal_aaxyz_nsc_5'
+                             - 'stacking_reward': data = 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25', label = 'stacking_reward'
+                             See the docstring for __init__ for details on data_features_to_extract and label_features_to_extract.
+        :return: The class object for CostarBlockStackingDataset that can be fed into a DataLoader of choice to get train/test/val queues.
+        '''
+        if set_name not in COSTAR_SET_NAMES:
+            raise ValueError("CostarBlockStackingDataset: Specify costar_set_name as one of {'blocks_only', 'blocks_with_plush_toy'}")
+        if subset_name not in COSTAR_SUBSET_NAMES:
+            raise ValueError("CostarBlockStackingDataset: Specify costar_subset_name as one of "
+                             "{'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}")
+
+        txt_filename = 'costar_block_stacking_dataset_{0}_{1}_{2}_{3}_files.txt'.format(version, set_name, subset_name, split)
+        txt_filename = os.path.expanduser(os.path.join(root, set_name, txt_filename))
+        if verbose > 0:
+            print("Loading {0} filenames from txt files: \n\t{1}".format(split, txt_filename))
+
+        with open(txt_filename, 'r') as f:
+            data_filenames = f.read().splitlines()
+
+        if feature_mode not in COSTAR_FEATURE_MODES:
+            if verbose > 0:
+                print("Using feature mode: " + feature_mode)
+                if feature_mode != 'all_features':
+                    print("Unknown feature mode: {}".format(feature_mode))
+                    print("Using the original input block as the features")
+            data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17']
+            label_features = ['grasp_goal_xyz_aaxyz_nsc_8']
+        else:
+            if feature_mode == 'translation_only':
+                data_features = ['image_0_image_n_vec_xyz_nxygrid_12']
+                label_features = ['grasp_goal_xyz_3']
+            elif feature_mode == 'rotation_only':
+                data_features = ['image_0_image_n_vec_xyz_aaxyz_nsc_15']
+                label_features = ['grasp_goal_aaxyz_nsc_5']
+            elif feature_mode == 'stacking_reward':
+                data_features = ['image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25']
+                label_features = ['stacking_reward']
+
+        data = cls(
+            data_filenames,
+            label_features_to_extract=label_features, data_features_to_extract=data_features,
+            total_actions_available=total_actions_available,
+            seed=seed, random_state=random_state,
+            is_training=is_training, random_augmentation=random_augmentation,
+            random_shift=random_shift,
+            output_shape=output_shape,
+            blend_previous_goal_images=blend_previous_goal_images,
+            num_images_per_example=num_images_per_example,
+            verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
+            pose_name=pose_name,
+            force_random_training_pose_augmentation=force_random_training_pose_augmentation)
+
+        return data
 
     def __len__(self):
         """Return the lenth of file names
         """
-        return len(self.list_example_filenames)
+        return len(self.list_example_filenames) * self.num_images_per_example
 
     def __getitem__(self, index):
         '''Generate one example of data
@@ -632,16 +726,16 @@ class CostarBlockStackingDataset(Dataset):
         # list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
         # Generate data
         self.infer_index = self.infer_index + 1
-        X, y = self.__data_generation(self.list_example_filenames[index], self.infer_index)
+        X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
 
         return X, y
 
-    def get_estimated_time_steps_per_example(self):
-        """ Get the estimated images per example,
-
-        Run extra steps in proportion to this if you want to get close to visiting every image.
+    def get_num_images_per_example(self):
+        """ Get the estimated images per example.
+        Note that the data loader already visit samples this many times.
+        Run extra steps in proportion to this if you want to visit even more images per sample.
         """
-        return self.estimated_time_steps_per_example
+        return self.num_images_per_example
 
     def __data_generation(self, data_path, images_index):
         """ Generates data containing batch_size samples
@@ -679,6 +773,8 @@ class CostarBlockStackingDataset(Dataset):
             if format == 'numpy':
                 imgs = np.array(imgs)
             return imgs
+
+        warnings.simplefilter('ignore')  # Ignore skimage warnings on anti-aliasing
         try:
             # Initialization
             if self.verbose > 0:
@@ -705,7 +801,7 @@ class CostarBlockStackingDataset(Dataset):
                     raise ValueError('CostarBlockStackingDataset: Trying to open something which is not a file: ' + str(example_filename))
                 with h5py.File(example_filename, 'r') as data:
                     if 'gripper_action_goal_idx' not in data or 'gripper_action_label' not in data:
-                        raise ValueError('block_stacking_reader.py: You need to run preprocessing before this will work! \n' +
+                        raise ValueError('CostarBlockStackingDataset: You need to run preprocessing before this will work! \n' +
                                          '    python2 ctp_integration/scripts/view_convert_dataset.py --path ~/.keras/datasets/costar_block_stacking_dataset_v0.4 --preprocess_inplace gripper_action --write'
                                          '\n File with error: ' + str(example_filename))
                     # indices = [0]
@@ -885,6 +981,21 @@ class CostarBlockStackingDataset(Dataset):
                 raise ValueError('Unsupported input data for y: ' + str(x))
 
             # Assemble the data batch
+            # HACK(rexxarchl): tf process the data in batches, while torch process one-by-one.
+            #                  Therefore, while tf outputs (batch, 224, 224, 57) tensors, torch will output (batch, 1, 224, 224, 57)
+            #                  Use squeeze to eliminate the redundant dimensions with depth of 1.
+            if isinstance(X, list):
+                X = [np.squeeze(X[i]) for i in range(len(X))]
+            else:
+                X = np.squeeze(X)
+
+            X = np.moveaxis(X, 2, 0)  # Switch to channel-first format as per torch convention
+
+            if isinstance(y, list):
+                y = [np.squeeze(y[i]) for i in range(len(y))]
+            else:
+                y = np.squeeze(y)
+
             batch = (X, y)
 
             if self.verbose > 0:
@@ -918,16 +1029,18 @@ if __name__ == "__main__":
         filenames, verbose=1,
         output_shape=output_shape,
         label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
-        data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
+        # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
+        data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
         blend_previous_goal_images=False, inference_mode=False)
-    num_batches = len(costar_dataset)
-    print(num_batches)
 
-    generator = DataLoader(costar_dataset, batch_size=1, shuffle=True, num_workers=1)
+    generator = DataLoader(costar_dataset, batch_size=128, shuffle=True, num_workers=1)
+    print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
     for generator_output in generator:
         print("-------------------op")
         x, y = generator_output
+        print(x.shape)
+        print(y.shape)
 
         for i, data in enumerate(x):
             print("x[{}]: ".format(i) + str(data.shape))
