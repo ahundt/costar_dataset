@@ -582,6 +582,14 @@ class CostarBlockStackingDataset(Dataset):
         if random_state is None:
             random_state = RandomState(seed)
         # self.batch_size = batch_size
+
+        # HACK(rexxarchl): fix bad file paths in standard txt files on the Archive
+        if '/.keras/dataset/' in list_example_filenames[0]:
+            for i, f in enumerate(list_example_filenames):
+                path = f.split('/')
+                path[:3] = ['~', '.keras', 'datasets']
+                list_example_filenames[i] = os.path.join(*path)
+
         self.list_example_filenames = list_example_filenames
         # self.shuffle = shuffle
         self.seed = seed
