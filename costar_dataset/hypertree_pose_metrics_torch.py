@@ -509,7 +509,7 @@ def normalize_sin_theta_cos_theta(sin_theta, cos_theta):
     Output values will be in (-1, 1).
     normalize the prediction but keep the vector direction the same
     """
-    print('>>>>> [[sin_theta, cos_theta]]: ' + str([[sin_theta, cos_theta]]))
+    # print('>>>>> [[sin_theta, cos_theta]]: ' + str([[sin_theta, cos_theta]]))
     arr = preprocessing.normalize(np.array([[sin_theta, cos_theta]], dtype=np.float))
     sin_theta = arr[0, 0]
     cos_theta = arr[0, 1]
