@@ -286,7 +286,9 @@ def encode_action_and_images(
         y=None,
         random_augmentation=None,
         encoded_goal_pose=None,
-        epsilon=1e-3):
+        epsilon=1e-3,
+        # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
+        single_batch_cube=True):
     """ Given an action and images, return the combined input object performing prediction with keras.
 
     data_features_to_extract: A string identifier for the encoding to use for the actions and images.
@@ -302,6 +304,8 @@ def encode_action_and_images(
         it will modify the poses with a small amount of translation and rotation
         with the probablity specified by the provided floating point number.
     encoded_goal_pose: A pre-encoded goal pose for use in actor/critic classification of proposals.
+    single_batch_cube: False will keep images and vector data in a tuple.
+       True will tile the vector data to be the same shape as the image data, and concatenate it all into a cube of data.
     """
 
     action_labels = np.array(action_labels)
@@ -349,7 +353,7 @@ def encode_action_and_images(
     else:
         raise ValueError('Unsupported data input: ' + str(data_features_to_extract))
 
-    if (data_features_to_extract is not None and
+    if (single_batch_cube and data_features_to_extract is not None and
             ('image_0_image_n_vec_xyz_10' in data_features_to_extract or
              'image_0_image_n_vec_xyz_aaxyz_nsc_15' in data_features_to_extract or
              'image_0_image_n_vec_xyz_nxygrid_12' in data_features_to_extract or
@@ -365,7 +369,8 @@ def encode_action_and_images(
     # check if any of the data features expect nxygrid normalized x, y coordinate grid values
     grid_labels = [s for s in data_features_to_extract if 'nxygrid' in s]
     # print('grid labels: ' + str(grid_labels))
-    if (data_features_to_extract is not None and grid_labels):
+    if (data_features_to_extract is not None and grid_labels and single_batch_cube):
+        # TODO(ahundt) clean up this nxygrid stuff, which is like coordconv, it does not work if nxygrid is specified and nxygrid string is present 
         X = concat_unit_meshgrid_np(X)
     return X
 
@@ -542,7 +547,9 @@ class CostarBlockStackingDataset(Dataset):
                  blend_previous_goal_images=False,
                  num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                  pose_name='pose_gripper_center',
-                 force_random_training_pose_augmentation=None):
+                 force_random_training_pose_augmentation=None,
+                 # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
+                 single_batch_cube=True):
         '''Initialization
 
         # Arguments
@@ -572,6 +579,8 @@ class CostarBlockStackingDataset(Dataset):
                 of the robot, which is the base of the gripper wrist.
             'pose_gripper_center' is a point in between the robotiq C type gripping plates when the gripper is open
                 with the same orientation as pose.
+        single_batch_cube: False will keep images and vector data in a tuple.
+           True will tile the vector data to be the same shape as the image data, and concatenate it all into a cube of data.
 
         # Explanation of abbreviations:
 
@@ -612,6 +621,7 @@ class CostarBlockStackingDataset(Dataset):
         self.infer_index = 0
         self.one_hot_encoding = one_hot_encoding
         self.pose_name = pose_name
+        self.single_batch_cube = single_batch_cube
 
         if self.seed is not None and not self.is_training:
             # repeat the same order if we're validating or testing
@@ -642,7 +652,9 @@ class CostarBlockStackingDataset(Dataset):
                           blend_previous_goal_images=False,
                           num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                           pose_name='pose_gripper_center',
-                          force_random_training_pose_augmentation=None):
+                          force_random_training_pose_augmentation=None,
+                          # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
+                          single_batch_cube=True):
         '''
         Loads the filenames from specified set, subset and split from the standard txt files.
         Since CoSTAR BSD v0.4, the names for the .txt files that stores filenames for train/val/test splits are in standardized.
@@ -714,7 +726,8 @@ class CostarBlockStackingDataset(Dataset):
             num_images_per_example=num_images_per_example,
             verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
             pose_name=pose_name,
-            force_random_training_pose_augmentation=force_random_training_pose_augmentation)
+            force_random_training_pose_augmentation=force_random_training_pose_augmentation,
+            single_batch_cube=single_batch_cube)
 
         return data
 
@@ -953,9 +966,17 @@ class CostarBlockStackingDataset(Dataset):
                 print('Error: Skipping file due to IO error when opening ' + example_filename + ': ' + str(ex))
 
             action_labels = np.array(action_labels)
-            init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
-            current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
-            poses = np.array(poses)
+            # note: we disabled keras format of numpy arrays
+            # init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
+            # TODO(ahundt) make sure this doen't happen wrong, see dataset reader collate and prefetch
+            init_images = np.moveaxis(init_images, 2, 0)  # Switch to channel-first format as per torch convention
+            init_images = np.array(current_images, dtype=np.float32)
+            # note: we disabled keras format of numpy arrays
+            # current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
+            # TODO(ahundt) make sure this doen't happen wrong, see dataset reader collate and prefetch
+            current_images = np.moveaxis(current_images, 2, 0)  # Switch to channel-first format as per torch convention
+            current_images = np.array(current_images, dtype=np.float32)
+            # poses = np.array(poses, dtype=np.float32)
 
             # encoded_goal_pose = None
             # print('encoded poses shape: ' + str(encoded_poses.shape))
@@ -971,7 +992,8 @@ class CostarBlockStackingDataset(Dataset):
                 data_features_to_extract=self.data_features_to_extract,
                 poses=poses, action_labels=action_labels,
                 init_images=init_images, current_images=current_images,
-                y=y, random_augmentation=self.random_encoding_augmentation)
+                y=y, random_augmentation=self.random_encoding_augmentation,
+                single_batch_cube=self.single_batch_cube)
 
             # print("type=======",type(X))
             # print("shape=====",X.shape)
@@ -997,8 +1019,7 @@ class CostarBlockStackingDataset(Dataset):
             else:
                 X = np.squeeze(X)
 
-            X = np.moveaxis(X, 2, 0)  # Switch to channel-first format as per torch convention
-
+            # TODO(ahundt) make sure this doen't happen wrong, see dataset reader collate and prefetch
             if isinstance(y, list):
                 y = [np.squeeze(y[i]) for i in range(len(y))]
             else:
