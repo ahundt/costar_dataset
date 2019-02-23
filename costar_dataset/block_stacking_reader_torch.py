@@ -398,7 +398,7 @@ def inference_mode_gen(file_names):
     return file_list_updated
 
 
-def preprocess_numpy_input(x):
+def preprocess_numpy_input_tf(x):
     """From keras_applications.imagenet_utils
     https://github.com/keras-team/keras-applications/blob/master/keras_applications/imagenet_utils.py
 
@@ -415,6 +415,49 @@ def preprocess_numpy_input(x):
     x /= 127.5
     x -= 1.
     return x
+
+
+def preprocess_numpy_input_torch(x):
+    """From keras_applications.imagenet_utils
+    https://github.com/keras-team/keras-applications/blob/master/keras_applications/imagenet_utils.py
+
+    Preprocesses a Numpy array encoding a batch of images.
+    Will scale pixels between 0 and 1 and then will normalize each channel with respect to the ImageNet dataset.
+    ('torch' mode in original code)
+
+    # Arguments
+        x: Input array, 3D or 4D. BCHW or CHW format
+    # Returns
+        Preprocessed Numpy array.
+    """
+    if not issubclass(x.dtype.type, np.floating):
+        x = x.astype(np.float32, copy=False)
+
+    x /= 255.
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    if x.ndim == 3:
+        x[0, :, :] -= mean[0]
+        x[1, :, :] -= mean[1]
+        x[2, :, :] -= mean[2]
+        x[0, :, :] /= std[0]
+        x[1, :, :] /= std[1]
+        x[2, :, :] /= std[2]
+    else:
+        x[:, 0, :, :] -= mean[0]
+        x[:, 1, :, :] -= mean[1]
+        x[:, 2, :, :] -= mean[2]
+        x[:, 0, :, :] /= std[0]
+        x[:, 1, :, :] /= std[1]
+        x[:, 2, :, :] /= std[2]
+
+    print("min={}, max={}".format(np.min(x), np.max(x)))
+
+    return x
+
+
+preprocess_numpy_input = preprocess_numpy_input_tf
 
 
 def random_shift(x, wrg, hrg, row_axis=1, col_axis=2, channel_axis=0,
@@ -558,7 +601,7 @@ class CostarBlockStackingDataset(Dataset):
                  pose_name='pose_gripper_center',
                  force_random_training_pose_augmentation=None,
                  # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
-                 single_batch_cube=False):
+                 single_batch_cube=True):
         '''Initialization
 
         # Arguments
@@ -663,7 +706,7 @@ class CostarBlockStackingDataset(Dataset):
                           pose_name='pose_gripper_center',
                           force_random_training_pose_augmentation=None,
                           # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
-                          single_batch_cube=False):
+                          single_batch_cube=True):
         '''
         Loads the filenames from specified set, subset and split from the standard txt files.
         Since CoSTAR BSD v0.4, the names for the .txt files that stores filenames for train/val/test splits are in standardized.
@@ -1070,7 +1113,7 @@ if __name__ == "__main__":
         data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
         blend_previous_goal_images=False, inference_mode=False, num_images_per_example=1, single_batch_cube=True)
 
-    generator = DataLoader(costar_dataset, batch_size=128, shuffle=True, num_workers=1)
+    generator = DataLoader(costar_dataset, batch_size=32, shuffle=True, num_workers=1)
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
 
