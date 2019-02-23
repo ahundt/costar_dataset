@@ -10,9 +10,9 @@ from tqdm import tqdm
 import torch
 from shapely.geometry import Polygon
 from pyquaternion import Quaternion
-import sklearn
+from sklearn import preprocessing
 
-import hypertree_utilities
+import costar_dataset.hypertree_utilities
 
 # class Vector:
 #     # http://www.mathopenref.com/coordpolygonarea.html
@@ -509,7 +509,8 @@ def normalize_sin_theta_cos_theta(sin_theta, cos_theta):
     Output values will be in (-1, 1).
     normalize the prediction but keep the vector direction the same
     """
-    arr = sklearn.preprocessing.normalize(np.array([[sin_theta, cos_theta]], dtype=np.float))
+    # print('>>>>> [[sin_theta, cos_theta]]: ' + str([[sin_theta, cos_theta]]))
+    arr = preprocessing.normalize(np.array([[sin_theta, cos_theta]], dtype=np.float))
     sin_theta = arr[0, 0]
     cos_theta = arr[0, 1]
     return sin_theta, cos_theta
@@ -798,11 +799,12 @@ def normalize_axis(aaxyz, epsilon=1e-5, verbose=0):
 
     If axis is all zeros, epsilon is added to the final axis.
     """
+    print('normalize_axis aaxyz shape: ' + str(aaxyz.shape))
     if not np.any(aaxyz):
         # source: https://stackoverflow.com/a/23567941/99379
         # we checked if all values are zero, fix missing axis
         aaxyz[-1] += epsilon
-    arr = sklearn.preprocessing.normalize(np.array([aaxyz], dtype=np.float))
+    arr = preprocessing.normalize(np.array(aaxyz, dtype=np.float).reshape(1, -1))
     aaxyz = np.squeeze(arr[0, :])
     if verbose:
         print('normalize_axis: ' + str(aaxyz))
@@ -899,6 +901,8 @@ def decode_xyz_aaxyz_nsc_to_xyz_qxyzw(xyz_aaxyz_nsc, rescale_meters=4, rotation_
     xyz = (xyz_aaxyz_nsc[:3] - 0.5) * rescale_meters
     length = len(xyz_aaxyz_nsc)
     if length == 8:
+        print('>>>>>> xyz_aaxyz_nsc: ' + str(xyz_aaxyz_nsc))
+        print('>>>>>> xyz_aaxyz_nsc: ' + str(xyz_aaxyz_nsc))
         theta = decode_sin_cos(xyz_aaxyz_nsc[-2:])
         # decode ([0, 1] * rotation_weight) range to [-1, 1] range
         aaxyz = ((xyz_aaxyz_nsc[3:-2] - 0.5) * 2) / rotation_weight
@@ -934,9 +938,9 @@ def grasp_acc(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation=0.01, 
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
     # NOTE: If the below does not work, try y_true_xyz_aaxyz_nsc.shape[0]
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -961,8 +965,8 @@ def grasp_acc_5mm_7_5deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transla
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -987,8 +991,8 @@ def grasp_acc_1cm_15deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translat
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1013,7 +1017,7 @@ def grasp_acc_2cm_30deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translat
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
     filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1037,8 +1041,8 @@ def grasp_acc_4cm_60deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translat
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1062,8 +1066,8 @@ def grasp_acc_8cm_120deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transla
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1087,8 +1091,8 @@ def grasp_acc_16cm_240deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transl
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1112,8 +1116,8 @@ def grasp_acc_32cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transl
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1137,8 +1141,8 @@ def grasp_acc_64cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_transl
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1162,8 +1166,8 @@ def grasp_acc_128cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_trans
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1187,8 +1191,8 @@ def grasp_acc_256cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_trans
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1212,8 +1216,8 @@ def grasp_acc_512cm_360deg(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_trans
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation],
     #     [tf.float32], stateful=False,
     #     name='py_func/grasp_accuracy_xyz_aaxyz_nsc_batch')
-    [filter_result] = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc, max_translation, max_rotation)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1229,8 +1233,8 @@ def cart_error(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc):
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc],
     #     [tf.float32], stateful=False,
     #     name='py_func/absolute_cart_distance_xyz_aaxyz_nsc_batch')
-    [filter_result] = absolute_cart_distance_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = absolute_cart_distance_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1246,8 +1250,8 @@ def angle_error(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc):
     #     [y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc],
     #     [tf.float32], stateful=False,
     #     name='py_func/absolute_angle_distance_xyz_aaxyz_nsc_batch')
-    [filter_result] = absolute_angle_distance_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
-    torch.reshape(filter_result, y_true_xyz_aaxyz_nsc.get_shape()[0])
+    filter_result = absolute_angle_distance_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
+    np.reshape(filter_result, y_true_xyz_aaxyz_nsc.size()[0])
     return filter_result
 
 
@@ -1380,3 +1384,47 @@ def grasp_accuracy_xyz_aaxyz_nsc_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_ns
         accuracies.append(one_accuracy)
     accuracies = np.array(accuracies, np.float32)
     return accuracies
+
+
+# Python 3.6+ maintains dictionary insertion order by default
+GRASP_ACCURACY_METRICS = {
+    'grasp_acc_5mm_7_5deg': grasp_acc_5mm_7_5deg,
+    'grasp_acc_1cm_15deg': grasp_acc_1cm_15deg,
+    'grasp_acc_2cm_30deg': grasp_acc_2cm_30deg,
+    'grasp_acc_4cm_60deg': grasp_acc_4cm_60deg,
+    'grasp_acc_8cm_120deg': grasp_acc_8cm_120deg,
+    'grasp_acc_16cm_240deg': grasp_acc_16cm_240deg,
+    'grasp_acc_32cm_360deg': grasp_acc_32cm_360deg,
+    'grasp_acc_64cm_360deg': grasp_acc_64cm_360deg,
+    'grasp_acc_128cm_360deg': grasp_acc_128cm_360deg,
+    'grasp_acc_256cm_360deg': grasp_acc_256cm_360deg,
+    'grasp_acc_512cm_360deg': grasp_acc_256cm_360deg
+}
+
+
+def grasp_acc_in_bins_batch(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc):
+    """ Calculate 3D grasp accuracy for a batch of results according to progressively increasing thresholds.
+    :return: A dictionary with the keys being metric names and values being the percentage of the samples in the metric threshold.
+    """
+    batch_size = len(y_true_xyz_aaxyz_nsc)
+    visited = np.zeros(batch_size, dtype=bool)
+    counter = {}
+
+    # Python 3.6+ maintains dictionary insertion order by default, so this call will have increasing threshold functions
+    for metric_name, metric_fn in GRASP_ACCURACY_METRICS.items():
+        if np.all(visited):  # All samples in the batch are visited
+            # Fill the rest of the metrics with count = 0
+            counter[metric_name] = '0.000'
+            continue
+
+        # metric_fn return 1 if the sample is in the range and 0 otherwise
+        results = metric_fn(y_true_xyz_aaxyz_nsc, y_pred_xyz_aaxyz_nsc)
+
+        samples_in_range = np.sum(results) - np.sum(visited)  # Count the number of samples in the range
+        counter[metric_name] = '{:.3f}'.format(samples_in_range / batch_size)  # Record the percentage of samples in the range
+        visited[np.where(results)] = True  # Indicate the samples already in the range
+
+    if len(counter) != len(GRASP_ACCURACY_METRICS):  # Sanity check
+        raise ValueError("grasp_acc_in_bins_batch: counter and metrics length mismatch! len(counter) = {}, len(metrics) = {}".format)
+
+    return counter
