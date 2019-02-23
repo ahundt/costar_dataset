@@ -59,7 +59,7 @@ def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0
 
 def tile_vector_as_image_channels_np(vector_op, image_shape):
     """
-    Takes a vector of length n and an image shape BHWC,
+    Takes a vector of length n and an image shape BCHW,
     and repeat the vector as channels at each pixel.
 
     # Params
@@ -70,10 +70,12 @@ def tile_vector_as_image_channels_np(vector_op, image_shape):
     # input vector shape
     ivs = np.shape(vector_op)
     # reshape the vector into a single pixel
-    vector_pixel_shape = [ivs[0], 1, 1, ivs[1]]
+    # vector_pixel_shape = [ivs[0], 1, 1, ivs[1]]
+    vector_pixel_shape = [ivs[0], ivs[1], 1, 1]
     vector_op = np.reshape(vector_op, vector_pixel_shape)
     # tile the pixel into a full image
-    tile_dimensions = [1, image_shape[1], image_shape[2], 1]
+    # tile_dimensions = [1, image_shape[1], image_shape[2], 1]
+    tile_dimensions = [1, 1, image_shape[2], image_shape[3]]
     vector_op = np.tile(vector_op, tile_dimensions)
 
     return vector_op
@@ -97,7 +99,8 @@ def concat_images_with_tiled_vector_np(images, vector):
     image_shape = np.shape(images[0])
     tiled_vector = tile_vector_as_image_channels_np(vector, image_shape)
     images.append(tiled_vector)
-    combined = np.concatenate(images, axis=-1)
+    # combined = np.concatenate(images, axis=-1)
+    combined = np.concatenate(images, axis=1)
 
     return combined
 
@@ -110,24 +113,30 @@ def concat_unit_meshgrid_np(tensor):
     """
     assert len(tensor.shape) == 4
     # print('tensor shape: ' + str(tensor.shape))
-    y_size = tensor.shape[1]
-    x_size = tensor.shape[2]
+    # y_size = tensor.shape[1]
+    # x_size = tensor.shape[2]
+    y_size = tensor.shape[2]
+    x_size = tensor.shape[3]
     max_value = max(x_size, y_size)
     y, x = np.meshgrid(np.arange(y_size),
                        np.arange(x_size),
                        indexing='ij')
-    assert y.size == x.size and y.size == tensor.shape[1] * tensor.shape[2]
+    # assert y.size == x.size and y.size == tensor.shape[1] * tensor.shape[2]
+    assert y.size == x.size and y.size == tensor.shape[2] * tensor.shape[3]
     # print('x shape: ' + str(x.shape) + ' y shape: ' + str(y.shape))
     # rescale data and reshape to have the same dimension as the tensor
-    y = np.reshape(y / max_value, [1, y.shape[0], y.shape[1], 1])
-    x = np.reshape(x / max_value, [1, x.shape[0], x.shape[1], 1])
+    # y = np.reshape(y / max_value, [1, y.shape[0], y.shape[1], 1])
+    # x = np.reshape(x / max_value, [1, x.shape[0], x.shape[1], 1])
+    y = np.reshape(y / max_value, [1, 1, y.shape[0], y.shape[1]])
+    x = np.reshape(x / max_value, [1, 1, x.shape[0], x.shape[1]])
 
     # need to have a meshgrid for each example in the batch,
     # so tile along batch axis
     tile_dimensions = [tensor.shape[0], 1, 1, 1]
     y = np.tile(y, tile_dimensions)
     x = np.tile(x, tile_dimensions)
-    combined = np.concatenate([tensor, y, x], axis=-1)
+    # combined = np.concatenate([tensor, y, x], axis=-1)
+    combined = np.concatenate([tensor, y, x], axis=1)
     return combined
 
 
@@ -311,7 +320,7 @@ def encode_action_and_images(
     action_labels = np.array(action_labels)
     init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
     current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
-    poses = np.array(poses)
+    poses = np.array(poses, dtype=np.float32)
 
     # print('poses shape: ' + str(poses.shape))
     encoded_poses = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
@@ -549,7 +558,7 @@ class CostarBlockStackingDataset(Dataset):
                  pose_name='pose_gripper_center',
                  force_random_training_pose_augmentation=None,
                  # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
-                 single_batch_cube=True):
+                 single_batch_cube=False):
         '''Initialization
 
         # Arguments
@@ -654,7 +663,7 @@ class CostarBlockStackingDataset(Dataset):
                           pose_name='pose_gripper_center',
                           force_random_training_pose_augmentation=None,
                           # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
-                          single_batch_cube=True):
+                          single_batch_cube=False):
         '''
         Loads the filenames from specified set, subset and split from the standard txt files.
         Since CoSTAR BSD v0.4, the names for the .txt files that stores filenames for train/val/test splits are in standardized.
@@ -872,7 +881,6 @@ class CostarBlockStackingDataset(Dataset):
                         print('img_indices: ' + str(img_indices))
                     rgb_images = list(data['image'][img_indices])
                     rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
-
                     if self.blend:
                         # TODO(ahundt) move this to after the resize loop for a speedup
                         blended_image = blend_image_sequence(rgb_images)
@@ -967,16 +975,16 @@ class CostarBlockStackingDataset(Dataset):
 
             action_labels = np.array(action_labels)
             # note: we disabled keras format of numpy arrays
-            # init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
             # TODO(ahundt) make sure this doen't happen wrong, see dataset reader collate and prefetch
-            init_images = np.moveaxis(init_images, 2, 0)  # Switch to channel-first format as per torch convention
-            init_images = np.array(current_images, dtype=np.float32)
+            init_images = np.array(init_images, dtype=np.float32)
+            # print(init_images.shape)  # (1, 224, 224, 3)
+            init_images = np.moveaxis(init_images, 3, 1)  # Switch to channel-first format as per torch convention
+            # print(init_images.shape)  # (1, 3, 224, 224)
+
             # note: we disabled keras format of numpy arrays
-            # current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
             # TODO(ahundt) make sure this doen't happen wrong, see dataset reader collate and prefetch
-            current_images = np.moveaxis(current_images, 2, 0)  # Switch to channel-first format as per torch convention
             current_images = np.array(current_images, dtype=np.float32)
-            # poses = np.array(poses, dtype=np.float32)
+            current_images = np.moveaxis(current_images, 3, 1)  # Switch to channel-first format as per torch convention
 
             # encoded_goal_pose = None
             # print('encoded poses shape: ' + str(encoded_poses.shape))
@@ -1055,26 +1063,42 @@ if __name__ == "__main__":
     # print(filenames)
     # filenames_new = inference_mode_gen(filenames)
     costar_dataset = CostarBlockStackingDataset(
-        filenames, verbose=1,
+        filenames, verbose=0,
         output_shape=output_shape,
         label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
         # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
         data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
-        blend_previous_goal_images=False, inference_mode=False)
+        blend_previous_goal_images=False, inference_mode=False, num_images_per_example=1, single_batch_cube=True)
 
     generator = DataLoader(costar_dataset, batch_size=128, shuffle=True, num_workers=1)
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
-    for generator_output in generator:
-        print("-------------------op")
-        x, y = generator_output
-        print(x.shape)
-        print(y.shape)
 
-        for i, data in enumerate(x):
-            print("x[{}]: ".format(i) + str(data.shape))
+    # for generator_output in generator:
+    generator_output = iter(generator)
+    print("-------------------op")
+    # x, y = generator_output
+    x, y = next(generator_output)
+    print(len(x))
+    print(y.shape)
 
-        for i, data in enumerate(y):
-            print("y[{}]: ".format(i) + str(data.shape))
+    for i, data in enumerate(x):
+        print("x[{}]: ".format(i) + str(data.shape))
+    print(x[2])
 
-        print("-------------------")
+    i = 1
+    while x is not None:
+        x, y = generator_output.next()
+        # assert np.all(x[0] <= 1) and np.all(x[0] >= -1), "x[0] is not within range!"
+        # assert np.all(x[1] <= 1) and np.all(x[1] >= -1), "x[1] is not within range!"
+        # assert not np.any(np.isnan(x[2])), "x[2] has NaN!"
+        # assert not np.any(np.isnan(x[2])), "x has NaN!"
+        print(i)
+        i += 1
+
+
+    # for i, data in enumerate(y):
+    #     print("y[{}]: ".format(i) + str(data.shape))
+
+
+    print("-------------------")
