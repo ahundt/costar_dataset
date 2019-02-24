@@ -1013,19 +1013,21 @@ def action_label_check(action_labels, stored_action_labels=None):
 
 
 class AverageMeter(object):
-    """Computers running average"""
+    """Computes and stores the average and current value"""
     def __init__(self):
         self.reset()
-    
+
     def reset(self):
         self.val = 0
         self.avg = 0
+        self.sum = 0
         self.count = 0
 
-    def update(self, val):
+    def update(self, val, n=1):
         self.val = val
-        self.count += 1
-        self.avg = self.avg + (val - self.avg) / self.count
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
 if __name__ == "__main__":
