@@ -799,7 +799,6 @@ def normalize_axis(aaxyz, epsilon=1e-5, verbose=0):
 
     If axis is all zeros, epsilon is added to the final axis.
     """
-    print('normalize_axis aaxyz shape: ' + str(aaxyz.shape))
     if not np.any(aaxyz):
         # source: https://stackoverflow.com/a/23567941/99379
         # we checked if all values are zero, fix missing axis
@@ -901,8 +900,8 @@ def decode_xyz_aaxyz_nsc_to_xyz_qxyzw(xyz_aaxyz_nsc, rescale_meters=4, rotation_
     xyz = (xyz_aaxyz_nsc[:3] - 0.5) * rescale_meters
     length = len(xyz_aaxyz_nsc)
     if length == 8:
-        print('>>>>>> xyz_aaxyz_nsc: ' + str(xyz_aaxyz_nsc))
-        print('>>>>>> xyz_aaxyz_nsc: ' + str(xyz_aaxyz_nsc))
+        # print('>>>>>> xyz_aaxyz_nsc: ' + str(xyz_aaxyz_nsc))
+        # print('>>>>>> xyz_aaxyz_nsc: ' + str(xyz_aaxyz_nsc))
         theta = decode_sin_cos(xyz_aaxyz_nsc[-2:])
         # decode ([0, 1] * rotation_weight) range to [-1, 1] range
         aaxyz = ((xyz_aaxyz_nsc[3:-2] - 0.5) * 2) / rotation_weight
