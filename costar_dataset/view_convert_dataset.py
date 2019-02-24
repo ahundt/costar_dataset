@@ -282,8 +282,11 @@ def _parse_args():
                                    the action label that the robot was supposed to do at the time frame.
                                 2. Checks the action labels stored in each file for inconsistent ordering.
                              ''')
+    parser.add_argument("--avg_frame_count", action='store_true', default=False,
+                        help='Count the average number of frames for all files with at least one image.')
 
     return vars(parser.parse_args())
+
 
 def draw_matplotlib(depth_images, fps):
     for image in tqdm(depth_images):
@@ -435,6 +438,9 @@ def main(args, root="root"):
     # keep track of the previous index that was not skipped when looping through the data
     previous_i_not_skipped = None
     current_i_not_skipping = None
+
+    if args['avg_frame_count']:
+        frame_counter = AverageMeter()
 
     for i, filename in enumerate(progress_bar):
         # skip certain files based on command line parameters
@@ -659,6 +665,17 @@ def main(args, root="root"):
                     # so this conversion runs 1000x faster
                     continue
 
+                if args['avg_frame_count']:
+                    if 'image' not in data.keys():
+                        progress_bar.write('Skipping file "image" as key: ' + filename)
+                        continue
+                    total_frames = len(data['image'])
+                    if total_frames == 0:
+                        progress_bar.write('Skipping file without image frames: ' + filename)
+                        continue
+                    frame_counter.update(total_frames)
+                    continue
+
                 if args['goal_to_jpeg']:
                     # Visit all the goal timesteps and write out a jpeg file in the 'goal_images' folder
                     image_to_read = 'image'
@@ -813,6 +830,10 @@ def main(args, root="root"):
 
     if args['label_correction']:
         progress_bar.write('Run complete! Label correction csv:\n' + str(label_correction_csv_path))
+
+    if args['avg_frame_count']:
+        progress_bar.write('Run complete! Counted {} files. Average = {}'.format(
+                frame_counter.count, frame_counter.avg))
 
 
 def label_correction(
@@ -989,6 +1010,22 @@ def action_label_check(action_labels, stored_action_labels=None):
             if stored_action_labels[i] != action_labels[i]:
                 print("Expected in {0}: {1}, get: {2}".format(i, stored_action_labels[i], action_labels[i]))
         # raise ValueError("WARNING! Inconsistent action labels detected")
+
+
+class AverageMeter(object):
+    """Computers running average"""
+    def __init__(self):
+        self.reset()
+    
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.count = 0
+
+    def update(self, val):
+        self.val = val
+        self.count += 1
+        self.avg = self.avg + (val - self.avg) / self.count
 
 
 if __name__ == "__main__":
