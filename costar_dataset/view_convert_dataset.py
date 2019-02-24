@@ -832,8 +832,8 @@ def main(args, root="root"):
         progress_bar.write('Run complete! Label correction csv:\n' + str(label_correction_csv_path))
 
     if args['avg_frame_count']:
-        progress_bar.write('Run complete! Counted {} files. Average = {}'.format(
-                frame_counter.count, frame_counter.avg))
+        progress_bar.write('Run complete! Counted {} files. Total = {} Average = {}'.format(
+                frame_counter.count, frame_counter.sum, frame_counter.avg))
 
 
 def label_correction(
