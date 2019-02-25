@@ -16,6 +16,7 @@ import numpy as np
 from numpy.random import RandomState
 # import json
 import costar_dataset.hypertree_pose_metrics_torch as hypertree_pose_metrics
+import torch
 from torch.utils.data import Dataset, DataLoader
 import scipy
 
@@ -601,7 +602,7 @@ class CostarBlockStackingDataset(Dataset):
                  pose_name='pose_gripper_center',
                  force_random_training_pose_augmentation=None,
                  # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
-                 single_batch_cube=True):
+                 single_batch_cube=False):
         '''Initialization
 
         # Arguments
@@ -706,7 +707,7 @@ class CostarBlockStackingDataset(Dataset):
                           pose_name='pose_gripper_center',
                           force_random_training_pose_augmentation=None,
                           # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
-                          single_batch_cube=True):
+                          single_batch_cube=False):
         '''
         Loads the filenames from specified set, subset and split from the standard txt files.
         Since CoSTAR BSD v0.4, the names for the .txt files that stores filenames for train/val/test splits are in standardized.
@@ -1097,6 +1098,37 @@ class CostarBlockStackingDataset(Dataset):
         return batch
 
 
+# def collate_cube(batch):
+#     '''
+#     Collate function for when the data output of the Dataset object is not a mega cube.
+
+#     When single_batch_cube=True, the output shape of the Dataset object will be, for example, (57, 224, 224)
+#     Then, the user can use the default collate function of pyTorch DataLoader to form a batch of batch_size (B) with
+#      shape (B, 57, 224, 224)
+
+#     However, it's more efficient to do the mega cube formation in batch using numpy.
+#     This is also what the loader does in the Tensorflow version of this code.
+#     When single_batch_cube=False, the output of the Dataset object will be a list of length B, with each object in
+#      this list being a list of (img_0, img_n, vector).
+#     This function would convert the images and vector into np stacks, and process the stacks into a mega cube.
+
+#     Note that, since it is impossible to determine what the data_features_to_extract argument was for the Dataset object,
+#      unit mesh grid will always be added to the megacube. 
+#      The channel for the output data may increase 2 compared to when single_batch_cube=True as a result.
+#     '''
+#     data, targets = zip(*batch)
+
+#     # data is a list of length batch_size, and each element in this list is a list of (img_0, img_n, vector)
+#     image_0 = np.array([img[0] for img in data])
+#     image_n = np.array([img[1] for img in data])
+#     vector = np.array([img[2] for img in data])
+
+#     data = concat_images_with_tiled_vector_np([image_0, image_n], vector)
+#     data = concat_unit_meshgrid_np(data)
+
+#     return torch.tensor(data), torch.tensor(targets)
+
+
 if __name__ == "__main__":
     visualize = False
     output_shape = (224, 224, 3)
@@ -1105,15 +1137,23 @@ if __name__ == "__main__":
     filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
     # print(filenames)
     # filenames_new = inference_mode_gen(filenames)
-    costar_dataset = CostarBlockStackingDataset(
-        filenames, verbose=0,
-        output_shape=output_shape,
-        label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
-        # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
-        data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
-        blend_previous_goal_images=False, inference_mode=False, num_images_per_example=1, single_batch_cube=True)
+    # costar_dataset = CostarBlockStackingDataset(
+    #     filenames, verbose=0,
+    #     output_shape=output_shape,
+    #     label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
+    #     # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
+    #     data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
+    #     blend_previous_goal_images=False, inference_mode=False, num_images_per_example=1, single_batch_cube=False)
 
-    generator = DataLoader(costar_dataset, batch_size=32, shuffle=True, num_workers=1)
+    costar_dataset = CostarBlockStackingDataset.from_standard_txt(
+                      root='~/.keras/datasets/costar_block_stacking_dataset_v0.4/',
+                      version='v0.4', set_name='blocks_only', subset_name='success_only',
+                      split='train', feature_mode='all_features', output_shape=(224, 224, 3),
+                      num_images_per_example=1, is_training=False, single_batch_cube=False)
+
+    # generator = DataLoader(costar_dataset, batch_size=64, shuffle=False, num_workers=4, collate_fn=collate_cube)
+    generator = DataLoader(costar_dataset, batch_size=32, shuffle=False, num_workers=1)
+
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
 
@@ -1122,22 +1162,23 @@ if __name__ == "__main__":
     print("-------------------op")
     # x, y = generator_output
     x, y = next(generator_output)
-    print(len(x))
+    # print(len(x))
+    # print(x.shape)
     print(y.shape)
 
-    for i, data in enumerate(x):
-        print("x[{}]: ".format(i) + str(data.shape))
-    print(x[2])
+    # for i, data in enumerate(x):
+    #     print("x[{}]: ".format(i) + str(data.shape))
+    print(x[2].shape)
 
-    i = 1
-    while x is not None:
-        x, y = generator_output.next()
-        # assert np.all(x[0] <= 1) and np.all(x[0] >= -1), "x[0] is not within range!"
-        # assert np.all(x[1] <= 1) and np.all(x[1] >= -1), "x[1] is not within range!"
-        # assert not np.any(np.isnan(x[2])), "x[2] has NaN!"
-        # assert not np.any(np.isnan(x[2])), "x has NaN!"
-        print(i)
-        i += 1
+    # i = 1
+    # while x is not None:
+    #     x, y = generator_output.next()
+    #     # assert np.all(x[0] <= 1) and np.all(x[0] >= -1), "x[0] is not within range!"
+    #     # assert np.all(x[1] <= 1) and np.all(x[1] >= -1), "x[1] is not within range!"
+    #     # assert not np.any(np.isnan(x[2])), "x[2] has NaN!"
+    #     # assert not np.any(np.isnan(x[2])), "x has NaN!"
+    #     print(i)
+    #     i += 1
 
 
     # for i, data in enumerate(y):
