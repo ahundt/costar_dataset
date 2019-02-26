@@ -1130,59 +1130,79 @@ class CostarBlockStackingDataset(Dataset):
 
 
 if __name__ == "__main__":
-    visualize = False
+    from tqdm import tqdm
+    visualize = True
+    single_batch_cube = False
     output_shape = (224, 224, 3)
-    # output_shape = None
-    # tf.enable_eager_execution()
-    filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
-    # print(filenames)
-    # filenames_new = inference_mode_gen(filenames)
+
+    # filenames = glob.glob(os.path.expanduser('~/.keras/datasets/costar_block_stacking_dataset_v0.4/blocks_only/*success.h5f'))
     # costar_dataset = CostarBlockStackingDataset(
     #     filenames, verbose=0,
     #     output_shape=output_shape,
     #     label_features_to_extract='grasp_goal_xyz_aaxyz_nsc_8',
     #     # data_features_to_extract=['current_xyz_aaxyz_nsc_8'],
     #     data_features_to_extract=['image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17'],
-    #     blend_previous_goal_images=False, inference_mode=False, num_images_per_example=1, single_batch_cube=False)
+    #     blend_previous_goal_images=False, inference_mode=False, num_images_per_example=1, single_batch_cube=single_batch_cube)
 
     costar_dataset = CostarBlockStackingDataset.from_standard_txt(
                       root='~/.keras/datasets/costar_block_stacking_dataset_v0.4/',
                       version='v0.4', set_name='blocks_only', subset_name='success_only',
                       split='train', feature_mode='all_features', output_shape=(224, 224, 3),
-                      num_images_per_example=1, is_training=False, single_batch_cube=False)
+                      num_images_per_example=1, is_training=False, single_batch_cube=single_batch_cube)
 
-    # generator = DataLoader(costar_dataset, batch_size=64, shuffle=False, num_workers=4, collate_fn=collate_cube)
+    # generator = DataLoader(costar_dataset, batch_size=64, shuffle=False, num_workers=4)
     generator = DataLoader(costar_dataset, batch_size=32, shuffle=False, num_workers=1)
 
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
-
-    # for generator_output in generator:
     generator_output = iter(generator)
     print("-------------------op")
     # x, y = generator_output
     x, y = next(generator_output)
     # print(len(x))
     # print(x.shape)
+    if single_batch_cube:
+        print(x.shape)
+    else:
+        print(x[0].shape, x[1].shape, x[2].shape)
     print(y.shape)
 
-    # for i, data in enumerate(x):
-    #     print("x[{}]: ".format(i) + str(data.shape))
-    print(x[2].shape)
+    pb = tqdm(range(len(generator)-1))
+    for i in pb:
+        pb.set_description('batch: {}'.format(i))
 
-    # i = 1
-    # while x is not None:
-    #     x, y = generator_output.next()
-    #     # assert np.all(x[0] <= 1) and np.all(x[0] >= -1), "x[0] is not within range!"
-    #     # assert np.all(x[1] <= 1) and np.all(x[1] >= -1), "x[1] is not within range!"
-    #     # assert not np.any(np.isnan(x[2])), "x[2] has NaN!"
-    #     # assert not np.any(np.isnan(x[2])), "x has NaN!"
-    #     print(i)
-    #     i += 1
+        x, y = generator_output.next()
+        y = y.numpy()
+        x = [t.numpy() for t in x] if not single_batch_cube else x.numpy()
 
+        if visualize:
+            import matplotlib
+            import matplotlib.pyplot as plt
+            if single_batch_cube:
+                clear_view_img = np.moveaxis(x[0, :3, :, :], 0, 2)
+                current_img = np.moveaxis(x[0, 3:6, :, :], 0, 2)
+            else:
+                clear_view_img = np.moveaxis(x[0][0], 0, 2)
+                current_img = np.moveaxis(x[1][0], 0, 2)
 
-    # for i, data in enumerate(y):
-    #     print("y[{}]: ".format(i) + str(data.shape))
+            # clear view image
+            plt.imshow(clear_view_img / 2.0 + 0.5)
+            plt.draw()
+            plt.pause(0.25)
+            # current timestep image
+            plt.imshow(current_img / 2.0 + 0.5)
+            plt.draw()
+            plt.pause(0.25)
+            # uncomment the following line to wait for one window to be closed before showing the next
+            # plt.show()
 
-
-    print("-------------------")
+        if single_batch_cube:
+            assert np.all(x[:, :3, :, :] <= 1) and np.all(x[:, :3, :, :] >= -1), "x[0] is not within range!"
+            assert np.all(x[:, 3:6, :, :] <= 1) and np.all(x[:, 3:6, :, :] >= -1), "x[1] is not within range!"
+            assert np.all(x[:, 6:, :, :] <= 1) and np.all(x[:, 6:, :, :] >= 0), "x[2] is not within range!"
+            assert np.all(y <= 1) and np.all(y >= 0), "y is not within range!"
+        else:
+            assert np.all(x[0] <= 1) and np.all(x[0] >= -1), "x[0] is not within range!"
+            assert np.all(x[1] <= 1) and np.all(x[1] >= -1), "x[1] is not within range!"
+            assert np.all(x[2] <= 1) and np.all(x[2] >= 0), "x[2] is not within range!"
+            assert np.all(y <= 1) and np.all(y >= 0), "y is not within range!"
