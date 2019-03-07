@@ -1,2 +1,3 @@
 # costar_dataset
-Pretrained Weights for the costar dataset, details coming soon...
+
+Loader for the [JHU CoSTAR Block Stacking Dataset](https://sites.google.com/site/costardataset), supports [pytorch](pytorch.org) and [tensorflow](tensorflow.org).
