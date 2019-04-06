@@ -19,10 +19,11 @@ import costar_dataset.hypertree_pose_metrics_torch as hypertree_pose_metrics
 import torch
 from torch.utils.data import Dataset, DataLoader
 import scipy
+import random
 
 COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy']
 COSTAR_SUBSET_NAMES = ['success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure']
-COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward']
+COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward', 'time_difference_images']
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -588,6 +589,41 @@ def transform_matrix_offset_center(matrix, x, y):
     transform_matrix = np.dot(np.dot(offset_matrix, matrix), reset_matrix)
     return transform_matrix
 
+def generate_training_data(video):
+        """Input data: numpy array of frames of a video
+           Output: classify how many frames there are between two random frames.
+        """
+        frames = np.empty((2, *video.shape[1:]))
+        label = np.zeros(6)
+
+        interval = random.randint(0, 5)
+        if interval == 0:
+            possible_frames_start = 0
+            possible_frames_end = 0
+        elif interval == 1:
+            possible_frames_start = 1
+            possible_frames_end = 1
+        elif interval == 2:
+            possible_frames_start = 2
+            possible_frames_end = 2
+        elif interval == 3:
+            possible_frames_start = 3
+            possible_frames_end = 4
+        elif interval == 4:
+            possible_frames_start = 5
+            possible_frames_end = 20
+        elif interval == 5:
+            possible_frames_start = 21
+            possible_frames_end = 200
+
+        first_frame_index = random.randint(0, video.shape[0] - possible_frames_end - 1)
+        second_frame_index = random.randint(possible_frames_start, possible_frames_end)
+
+        frames[0] = video[first_frame_index] / 255 # To normalize data
+        frames[1] = video[first_frame_index + second_frame_index] / 255
+        label[interval] = 1.
+        return (frames[0],frames[1], interval)
+
 
 class CostarBlockStackingDataset(Dataset):
     def __init__(self, list_example_filenames,
@@ -619,6 +655,7 @@ class CostarBlockStackingDataset(Dataset):
             'proposed_goal_xyz_aaxyz_nsc_8' a pose at the end of the current action (for classification cases),
             'image_0_image_n_vec_xyz_nxygrid_12' another giant cube without rotation and with explicit normalized xy coordinates,
             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' another giant cube with rotation and explicit normalized xy coordinates.
+            'image_m_image_n' a giant NCHW cuboid of images 
         random_augmentation: None or a float value between 0 and 1 indiciating how frequently random augmentation should be applied.
         num_images_per_example: The number of images in each example varies, so we simply sample in proportion to an estimated number
             of images per example. Set this number high if you want to visit more images in the same example.
@@ -724,13 +761,14 @@ class CostarBlockStackingDataset(Dataset):
         :param subset_name: The subset that will be loaded.
                             Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
         :param split: The split that will be loaded. One of {'train', 'test', 'val'}
-        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features', 'time_difference_images'}. Correspond to different
                              feature combos that the returned data will have. If leave blank, will default to 'all_features'
                              Feature combo and their corresponding data and label features:
                              - 'all_features': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
                              - 'translation_only': data = 'image_0_image_n_vec_xyz_nxygrid_12', label = 'grasp_goal_xyz_3'
                              - 'rotation_only': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_15', label = 'grasp_goal_aaxyz_nsc_5'
                              - 'stacking_reward': data = 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25', label = 'stacking_reward'
+                             - 'time_difference_images': data = 'image_m_image_n', label = 'time_intervals'
                              See the docstring for __init__ for details on data_features_to_extract and label_features_to_extract.
         :return: The class object for CostarBlockStackingDataset that can be fed into a DataLoader of choice to get train/test/val queues.
         '''
@@ -766,6 +804,9 @@ class CostarBlockStackingDataset(Dataset):
             elif feature_mode == 'stacking_reward':
                 data_features = ['image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25']
                 label_features = ['stacking_reward']
+            elif feature_mode == 'time_difference_images':
+                data_features = ['image_m_image_n']
+                label_features = ['time_intervals']
 
         data = cls(
             data_filenames,
@@ -799,10 +840,14 @@ class CostarBlockStackingDataset(Dataset):
         # # Find list of example_filenames
         # list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
         # Generate data
-        self.infer_index = self.infer_index + 1
-        X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
-
-        return X, y
+        self.infer_index = self.infer_index + 1        
+        if self.data_features_to_extract == ['image_m_image_n']:
+            X1, X2, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
+            return X1, X2,y
+        else:
+            X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
+            
+            return X, y
 
     def get_num_images_per_example(self):
         """ Get the estimated images per example.
@@ -923,8 +968,13 @@ class CostarBlockStackingDataset(Dataset):
                     if self.verbose > 0:
                         print("Indices --", indices)
                         print('img_indices: ' + str(img_indices))
-                    rgb_images = list(data['image'][img_indices])
-                    rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
+
+                    if (self.data_features_to_extract is not None and 'image_m_image_n' in self.data_features_to_extract):
+                        rgb_images = data['image']
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW')
+                    else: 
+                        rgb_images = list(data['image'][img_indices])
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
                     if self.blend:
                         # TODO(ahundt) move this to after the resize loop for a speedup
                         blended_image = blend_image_sequence(rgb_images)
@@ -1016,6 +1066,10 @@ class CostarBlockStackingDataset(Dataset):
                     # print("y = ", y)
             except IOError as ex:
                 print('Error: Skipping file due to IO error when opening ' + example_filename + ': ' + str(ex))
+            # If features to extract is image_m_image_n then return batch (two images and label which is the interval)
+            if (self.data_features_to_extract is not None and 'image_m_image_n' in self.data_features_to_extract):
+                batch = generate_training_data(np.array(rgb_images_resized))
+                return batch
 
             action_labels = np.array(action_labels)
             # note: we disabled keras format of numpy arrays
