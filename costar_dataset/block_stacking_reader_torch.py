@@ -626,12 +626,11 @@ def generate_training_data(video):
 
 def generate_crossmodal_training_data(video,joints, length = 10):
     """Input data: numpy array of frames of a video
-        Output: classify how many frames there are between two random frames.
+        Output: classify how many frames there are between a frame and a vecctor of joints over 'length' frames.
     """
     frame = np.empty((1, *video.shape[1:]))
     label = np.zeros(6)
 
-    #interval = random.randint(0, 5)
     interval = np.random.choice(6)
 
     if interval == 0:
@@ -641,13 +640,10 @@ def generate_crossmodal_training_data(video,joints, length = 10):
     elif interval == 2:
         distance = 2
     elif interval == 3:
-        #distance = random.randint(3, 4 + 1)
         distance = np.random.choice(np.arange(3, 4 + 1))
     elif interval == 4:
-        #distance = random.randint(5, 20 + 1)
         distance = np.random.choice(np.arange(5, 20 + 1))
     elif interval == 5:
-        #distance = random.randint(21, 200 + 1)
         distance = np.random.choice(np.arange(21, 150 + 1))
     if (video.shape[0] - distance - length) < 0:
         raise ValueError('Length of video is less than 150 frames')
