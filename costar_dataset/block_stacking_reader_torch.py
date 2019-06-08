@@ -23,7 +23,7 @@ import random
 
 COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy']
 COSTAR_SUBSET_NAMES = ['success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure']
-COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward', 'time_difference_images']
+COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward', 'time_difference_images', 'cross_modal_embeddings']
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -614,7 +614,7 @@ def generate_training_data(video):
             possible_frames_end = 20
         elif interval == 5:
             possible_frames_start = 21
-            possible_frames_end = 200
+            possible_frames_end = 150
 
         first_frame_index = random.randint(0, video.shape[0] - possible_frames_end - 1)
         second_frame_index = random.randint(possible_frames_start, possible_frames_end)
@@ -624,6 +624,43 @@ def generate_training_data(video):
         label[interval] = 1.
         return (frames[0],frames[1], interval)
 
+def generate_crossmodal_training_data(video,joints, length = 10):
+    """Input data: numpy array of frames of a video
+        Output: classify how many frames there are between two random frames.
+    """
+    frame = np.empty((1, *video.shape[1:]))
+    label = np.zeros(6)
+
+    #interval = random.randint(0, 5)
+    interval = np.random.choice(6)
+
+    if interval == 0:
+        distance = 0
+    elif interval == 1:
+        distance = 1
+    elif interval == 2:
+        distance = 2
+    elif interval == 3:
+        #distance = random.randint(3, 4 + 1)
+        distance = np.random.choice(np.arange(3, 4 + 1))
+    elif interval == 4:
+        #distance = random.randint(5, 20 + 1)
+        distance = np.random.choice(np.arange(5, 20 + 1))
+    elif interval == 5:
+        #distance = random.randint(21, 200 + 1)
+        distance = np.random.choice(np.arange(21, 150 + 1))
+    if (video.shape[0] - distance - length) < 0:
+        raise ValueError('Length of video is less than 150 frames')
+    frame_index = np.random.randint(0, video.shape[0] - distance - length)
+    joint_index = frame_index + distance
+
+    
+    frame = video[frame_index] / 255 # To normalize data
+    joint = joints[joint_index:joint_index + length] 
+    joint = joint[np.newaxis]
+    label[interval] = 1.
+
+    return (frame, joint, interval)
 
 class CostarBlockStackingDataset(Dataset):
     def __init__(self, list_example_filenames,
@@ -656,6 +693,7 @@ class CostarBlockStackingDataset(Dataset):
             'image_0_image_n_vec_xyz_nxygrid_12' another giant cube without rotation and with explicit normalized xy coordinates,
             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' another giant cube with rotation and explicit normalized xy coordinates.
             'image_m_image_n' a giant NCHW cuboid of images 
+            'image_n_vec_xyz_q_dq_gripper' another giant NCHW cuboid of images, pose data, 6 joint angles of the UR5, change in joint angle and state of the gripper.
         random_augmentation: None or a float value between 0 and 1 indiciating how frequently random augmentation should be applied.
         num_images_per_example: The number of images in each example varies, so we simply sample in proportion to an estimated number
             of images per example. Set this number high if you want to visit more images in the same example.
@@ -761,7 +799,7 @@ class CostarBlockStackingDataset(Dataset):
         :param subset_name: The subset that will be loaded.
                             Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
         :param split: The split that will be loaded. One of {'train', 'test', 'val'}
-        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features', 'time_difference_images'}. Correspond to different
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features', 'time_difference_images', 'cross_modal_embeddings'}. Correspond to different
                              feature combos that the returned data will have. If leave blank, will default to 'all_features'
                              Feature combo and their corresponding data and label features:
                              - 'all_features': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
@@ -769,6 +807,7 @@ class CostarBlockStackingDataset(Dataset):
                              - 'rotation_only': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_15', label = 'grasp_goal_aaxyz_nsc_5'
                              - 'stacking_reward': data = 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25', label = 'stacking_reward'
                              - 'time_difference_images': data = 'image_m_image_n', label = 'time_intervals'
+                             - 'cross_modal_embeddings': data = 'image_n_vec_xyz_q_dq_gripper', label = 'cross_modal_time_intervals'
                              See the docstring for __init__ for details on data_features_to_extract and label_features_to_extract.
         :return: The class object for CostarBlockStackingDataset that can be fed into a DataLoader of choice to get train/test/val queues.
         '''
@@ -807,6 +846,9 @@ class CostarBlockStackingDataset(Dataset):
             elif feature_mode == 'time_difference_images':
                 data_features = ['image_m_image_n']
                 label_features = ['time_intervals']
+            elif feature_mode == 'cross_modal_embeddings':
+                data_features = ['image_n_vec_xyz_q_dq_gripper']#TODO
+                label_features = ['cross_modal_time_intervals']
 
         data = cls(
             data_filenames,
@@ -841,7 +883,7 @@ class CostarBlockStackingDataset(Dataset):
         # list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
         # Generate data
         self.infer_index = self.infer_index + 1        
-        if self.data_features_to_extract == ['image_m_image_n']:
+        if self.data_features_to_extract == ['image_m_image_n'] or self.data_features_to_extract == ['image_n_vec_xyz_q_dq_gripper']:
             X1, X2, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
             return X1, X2,y
         else:
@@ -969,7 +1011,8 @@ class CostarBlockStackingDataset(Dataset):
                         print("Indices --", indices)
                         print('img_indices: ' + str(img_indices))
 
-                    if (self.data_features_to_extract is not None and 'image_m_image_n' in self.data_features_to_extract):
+                    if (self.data_features_to_extract is not None and ('image_m_image_n' in self.data_features_to_extract or 
+                                                                       'image_n_vec_xyz_q_dq_gripper' in self.data_features_to_extract)):
                         rgb_images = data['image']
                         rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW')
                     else: 
@@ -1010,6 +1053,12 @@ class CostarBlockStackingDataset(Dataset):
                         print("reward estimate", current_stacking_reward)
                     # x = x + tuple([rgb_images[indices]])
                     # x = x + tuple([np.array(data[self.pose_name])[indices]])
+
+                    # create vector of pose, q and dq to form the joint embedding
+                    if(self.data_features_to_extract is not None and 'image_n_vec_xyz_q_dq_gripper' in self.data_features_to_extract):
+                        gripper_states = np.array(data['gripper'])
+                        gripper_states = np.expand_dims(gripper_states,1)
+                        joints = np.hstack((np.array(data['pose']), np.array(data['q']),np.array(data['dq']),gripper_states)) 
 
                     # WARNING: IF YOU CHANGE THIS ACTION ENCODING CODE BELOW, ALSO CHANGE encode_action() function ABOVE
                     if (self.data_features_to_extract is not None and
@@ -1066,9 +1115,12 @@ class CostarBlockStackingDataset(Dataset):
                     # print("y = ", y)
             except IOError as ex:
                 print('Error: Skipping file due to IO error when opening ' + example_filename + ': ' + str(ex))
-            # If features to extract is image_m_image_n then return batch (two images and label which is the interval)
+            # If features to extract is image_m_image_n then return batch (two images and label which is the interval)           
             if (self.data_features_to_extract is not None and 'image_m_image_n' in self.data_features_to_extract):
                 batch = generate_training_data(np.array(rgb_images_resized))
+                return batch
+            if (self.data_features_to_extract is not None and 'image_n_vec_xyz_q_dq_gripper' in self.data_features_to_extract): #TODO
+                batch = generate_crossmodal_training_data(np.array(rgb_images_resized),joints)
                 return batch
 
             action_labels = np.array(action_labels)
