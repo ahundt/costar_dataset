@@ -7,10 +7,22 @@ from costar_dataset.block_stacking_reader_torch import CostarBlockStackingDatase
 from tqdm import tqdm
 
 if __name__ == '__main__':
-    """ To test block_stacking_reader for feature_modes time_difference_images and cross_modal_embeddings"""
+    """ To test block_stacking_reader for feature_modes time_difference_images and cross_modal_embeddings
+    After reading the images and vectors using the dataloader, this program asserts that images and poses are in range. 
+    Args: 
+        videos_path - Path to the dataset. The path should point to the costar_block_stacking_dataset_v0.4 folder level 
+                      which contains the blocks_only and blocks_with_plush_toy folders.  
+        feature_mode - Options include cross_modal_embeddings and time_difference_images. Default is time_difference_images.
+                       time_difference_images - a feature mode where we try to classify time intervals between two frames.
+                       cross_modal_embeddings - is a mode where we try to classify time intervals between a frame and a contiguous M(default 10) vectors 
+                                                that comprises of encoded pose data, 6 joint angles of the UR5, change in joint angle and state of the gripper.
+        batch_size - Defaults to 32
+        visualize - Set true to view frames being read by the reader. Default is True.  
+    Usage: python test_time_difference_reader.py --videos_path ~/.keras/datasets/costar_block_stacking_dataset_v0.4 --feature_mode cross_modal_embeddings
+    """
     
     args_parser = argparse.ArgumentParser()
-    args_parser.add_argument('--videos_path', help='Path for training data')
+    args_parser.add_argument('--videos_path', help='Path to dataset', default='~/.keras/datasets/costar_block_stacking_dataset_v0.4')
     args_parser.add_argument('--feature_mode', help = 'cross_modal_embeddings or time_difference_images',default='time_difference_images')
     args_parser.add_argument('--batch_size', help='Batch size for training', type=int, default=32)
     args_parser.add_argument('--visualize', help='To view frames, set true', default=True)

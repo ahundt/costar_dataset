@@ -303,9 +303,15 @@ def encode_action_and_images(
     """ Given an action and images, return the combined input object performing prediction with keras.
 
     data_features_to_extract: A string identifier for the encoding to use for the actions and images.
-        Options include: 'image_0_image_n_vec_xyz_aaxyz_nsc_15', 'image_0_image_n_vec_xyz_10',
-            'current_xyz_aaxyz_nsc_8', 'current_xyz_3', 'proposed_goal_xyz_aaxyz_nsc_8',
-            'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper', 'image_m_image_n' .
+        Options include: 
+            'image_0_image_n_vec_xyz_aaxyz_nsc_15' - 
+            'image_0_image_n_vec_xyz_10' - 
+            'current_xyz_aaxyz_nsc_8' -  
+            'current_xyz_3' -  
+            'proposed_goal_xyz_aaxyz_nsc_8' - 
+            'image_m_image_n' - two images each of shape CHW at time stamps m and n respectively.  
+            'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' - an image and contiguous M(default 10) vectors that comprises of encoded pose data, 
+                                                       6 joint angles of the UR5, change in joint angle and state of the gripper.
     action_labels: batch of already one-hot or floating point encoded action label
     init_images: batch of clear view images, the initial in the time series.
         These should already be the appropriate size and rgb values in the range [0, 255].
@@ -729,8 +735,9 @@ class CostarBlockStackingDataset(Dataset):
             'proposed_goal_xyz_aaxyz_nsc_8' a pose at the end of the current action (for classification cases),
             'image_0_image_n_vec_xyz_nxygrid_12' another giant cube without rotation and with explicit normalized xy coordinates,
             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' another giant cube with rotation and explicit normalized xy coordinates.
-            'image_m_image_n' a giant NCHW cuboid of images 
-            'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' another giant NCHW cuboid of images, encoded pose data, 6 joint angles of the UR5, change in joint angle and state of the gripper.
+            'image_m_image_n' two images each of shape CHW at time stamps m and n respectively.  
+            'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' an image and contiguous M(default 10) vectors that comprises of -
+             encoded pose data, 6 joint angles of the UR5, change in joint angle and state of the gripper.
         random_augmentation: None or a float value between 0 and 1 indiciating how frequently random augmentation should be applied.
         num_images_per_example: The number of images in each example varies, so we simply sample in proportion to an estimated number
             of images per example. Set this number high if you want to visit more images in the same example.
