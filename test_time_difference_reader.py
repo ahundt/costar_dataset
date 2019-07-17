@@ -44,10 +44,9 @@ if __name__ == '__main__':
     print("Image 1 shape: ", x1.shape, "  Image 2/Joint shape: ",x2.shape, "  Labels shape: ", y.shape)
     
     pb = tqdm(range(len(generator)-1))
-    for i in pb:
+    for i, (x1, x2, y) in enumerate(generator):
         pb.set_description('batch: {}'.format(i))
 
-        x1, x2, y = generator_output.next()
         y = y.numpy()
         x1 = x1.numpy()
         x2 = x2.numpy()
