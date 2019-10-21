@@ -43,7 +43,10 @@ setup(
         'moviepy',
         'pygame',
         'matplotlib',
-        'shapely'],
+        'shapely',
+        'pyviz',
+        'bokeh',
+        'holoviews'],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
