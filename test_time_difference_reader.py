@@ -25,7 +25,7 @@ if __name__ == '__main__':
     args_parser.add_argument('--videos_path', help='Path to dataset', default='~/.keras/datasets/costar_block_stacking_dataset_v0.4')
     args_parser.add_argument('--feature_mode', help = 'cross_modal_embeddings or time_difference_images',default='time_difference_images')
     args_parser.add_argument('--batch_size', help='Batch size for training', type=int, default=32)
-    args_parser.add_argument('--visualize', help='To view frames, set true', default=True)
+    args_parser.add_argument('--visualize', help='To view frames, set true', action='store_true')
     args = args_parser.parse_args()
 
     visualize = args.visualize
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     costar_dataset = CostarBlockStackingDataset.from_standard_txt(
                       root=args.videos_path,
                       version='v0.4', set_name='blocks_only', subset_name='success_only',
-                      split='train', feature_mode=args.feature_mode, output_shape=(3, 96, 128),
+                      split='test', feature_mode=args.feature_mode, output_shape=(3, 96, 128),
                       num_images_per_example=200, is_training=False)
     generator = DataLoader(costar_dataset, args.batch_size, shuffle=False, num_workers=4)
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
@@ -86,3 +86,4 @@ if __name__ == '__main__':
         else:
             assert np.all(x2[:, :,:,:7] <= 1) and np.all(x2[:,:,:,:7] >= 0), "Joint_vec is not within range!"
         assert np.all(y <= 5) and np.all(y >= 0), "y is not within range!"
+        pb.update(1)
