@@ -30,6 +30,7 @@ __all__ = [
 ]
 
 if _backend == 'torch':
+    print("Using Torch Loader")
     from costar_dataset.block_stacking_reader_torch import CostarBlockStackingDataset
     from costar_dataset.hypertree_pose_metrics_torch import cart_error, angle_error
     __all__ += ['CostarBlockStackingDataset']  # export class name

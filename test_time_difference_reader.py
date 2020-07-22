@@ -33,7 +33,7 @@ if __name__ == '__main__':
     costar_dataset = CostarBlockStackingDataset.from_standard_txt(
                       root=args.videos_path,
                       version='v0.4', set_name='blocks_only', subset_name='success_only',
-                      split='test', feature_mode=args.feature_mode, output_shape=(3, 96, 128),
+                      split='test', feature_mode=args.feature_mode, output_shape=(3, 128, 128),
                       num_images_per_example=200, is_training=False)
     generator = DataLoader(costar_dataset, args.batch_size, shuffle=False, num_workers=4)
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
@@ -66,7 +66,7 @@ if __name__ == '__main__':
             # image 1
             fig1 = fig.add_subplot(1,2,1)
             fig1.set_title("Frame 1")
-            plt.imshow(img1)
+            plt.imshow(img1[:, :, :3])
             plt.draw()
             plt.pause(0.25)
 
@@ -74,7 +74,7 @@ if __name__ == '__main__':
                 # image 2
                 fig2 = fig.add_subplot(1,2,2)
                 fig2.set_title("Frame 2")
-                plt.imshow(img2)
+                plt.imshow(img2[:, :, :3])
                 plt.draw()
                 plt.pause(0.25)
             # uncomment the following line to wait for one window to be closed before showing the next    
