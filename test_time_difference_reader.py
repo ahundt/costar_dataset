@@ -33,15 +33,17 @@ if __name__ == '__main__':
     costar_dataset = CostarBlockStackingDataset.from_standard_txt(
                       root=args.videos_path,
                       version='v0.4', set_name='blocks_only', subset_name='success_only',
-                      split='test', feature_mode=args.feature_mode, output_shape=(3, 128, 128),
+                      split='test', feature_mode=args.feature_mode, output_shape=(4, 128, 128),
                       num_images_per_example=200, is_training=False)
     generator = DataLoader(costar_dataset, args.batch_size, shuffle=False, num_workers=4)
     print("Length of the dataset: {}. Length of the loader: {}.".format(len(costar_dataset), len(generator)))
 
     generator_output = iter(generator)
     print("-------------------op")
-    x1, x2, y = next(generator_output)
-    print("Image 1 shape: ", x1.shape, "  Image 2/Joint shape: ",x2.shape, "  Labels shape: ", y.shape)
+    #x1, x2, y = next(generator_output)
+    im1, im2, vec1, vec2, y = next(generator_output)
+    #print("Image 1 shape: ", x1.shape, "  Image 2/Joint shape: ",x2.shape, "  Labels shape: ", y.shape)
+    print("Image 1 shape: ", im1.shape, "  Image 2 shape: ", im2.shape, "Vec 1 shape: ", vec1.shape, "  Vec 2 shape: ", vec2.shape, "  Labels shape: ", y.shape)
     
     pb = tqdm(range(len(generator)-1))
     for i, (x1, x2, y) in enumerate(generator):

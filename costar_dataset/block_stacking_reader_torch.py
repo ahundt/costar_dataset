@@ -23,7 +23,7 @@ import random
 
 COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy', 'blocks_only_small']
 COSTAR_SUBSET_NAMES = ['success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure']
-COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward', 'time_difference_images', 'cross_modal_embeddings']
+COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward', 'time_difference_images', 'cross_modal_embeddings', 'hybrid_embeddings']
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -329,7 +329,7 @@ def encode_action_and_images(
         init_images = preprocess_numpy_input(np.array(init_images, dtype=np.double))
         poses = np.array(poses, dtype=np.float32)
         encoded_poses = []
-        # TODO fix this part
+        # TODO(adit98) fix this part
         for i in range(poses.shape[0]):
             encoded_pose = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
                     poses[i, :, :7], random_augmentation=random_augmentation)
@@ -344,6 +344,21 @@ def encode_action_and_images(
         init_images = preprocess_numpy_input(np.stack(init_images).astype(np.double))
         current_images = preprocess_numpy_input(np.stack(current_images).astype(np.double))
         return [init_images, current_images]
+    elif data_features_to_extract == 'image_m_vec_m_image_n_vec_n':
+        init_images = preprocess_numpy_input(np.stack(init_images).astype(np.double))
+        if current_images is not None:
+            current_images = preprocess_numpy_input(np.stack(current_images).astype(np.double))
+        poses = np.array(poses, dtype=np.float32)
+        encoded_poses = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
+                poses[:, :7], random_augmentation=random_augmentation)
+        encoded_poses = np.concatenate([encoded_poses, poses[:, 7:]], axis=-1)
+
+        # TODO(adit98) modify to use cmd line arg
+        if current_images is not None and encoded_poses.shape[0] > 1:
+            return [init_images, current_images], [encoded_poses[:1].flatten(), encoded_poses[1:].flatten()]
+ 
+        return init_images, encoded_poses.flatten()
+
     else:
         action_labels = np.array(action_labels)
         init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
@@ -630,19 +645,13 @@ def generate_training_data_indices(num_frames, length = 1):
     #elif interval == 1:
     #    distance = np.random.choice(np.arange(5, 20 + 1))
 
-    interval = np.random.choice(6)
+    interval = np.random.choice(4)
     if interval == 0:
-        distance = 0
+        distance = np.random.choice(np.arange(0, 2 + 1))
     elif interval == 1:
-        distance = 1
+        distance = np.random.choice(np.arange(3, 5 + 1))
     elif interval == 2:
-        distance = 2
-    elif interval == 3:
-        distance = np.random.choice(np.arange(3, 4 + 1))
-    elif interval == 4:
-        distance = np.random.choice(np.arange(5, 20 + 1))
-    elif interval == 5:
-        distance = np.random.choice(np.arange(21, 150 + 1))
+        distance = np.random.choice(np.arange(6, 20 + 1))
     else:
         distance = np.random.choice(np.arange(21, 150 + 1))
 
@@ -710,6 +719,8 @@ class CostarBlockStackingDataset(Dataset):
                     For feature_mode = 'cross_modal_embeddings', returns a sample image of shape - (No. of channels, height, width) and 
                                                                          a numpy array of joint_vectors of shape - (1, self.num_joints_concatenated, 21)
                                                                             where self.num_joints_concatenated is the No. of contiguous joint vectors concatenated 
+                    For feature_mode = 'hybrid_embeddings', returns 2 pairs of a sample image of shape - (No. of channels, height, width) and
+                                                                         a numpy array of joint_vectors of shape - (1, self.num_joints_concatenated, 21)
         single_batch_cube: False will keep images and vector data in a tuple.
            True will tile the vector data to be the same shape as the image data, and concatenate it all into a cube of data.
 
@@ -867,6 +878,9 @@ class CostarBlockStackingDataset(Dataset):
             elif feature_mode == 'cross_modal_embeddings':
                 data_features = ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper']
                 label_features = ['cross_modal_time_intervals']
+            elif feature_mode == 'hybrid_embeddings':
+                data_features = ['image_m_vec_m_image_n_vec_n']
+                label_features = ['time_intervals']
 
         if visualize_embeddings:
             # Create separate dataset for each video listed in the file.
@@ -916,10 +930,10 @@ class CostarBlockStackingDataset(Dataset):
                     # reduce the number of frames being considered as images, to accomodate concatenated joint vectors,
                     # avoids index out of range. 
                     return data['image'].shape[0] - self.num_joints_concatenated
+                elif self.data_features_to_extract == ['image_m_vec_m_image_n_vec_n']:
+                    return data['image'].shape[0]
  
-        #TODO(adit98) set cmd line param for num consecutive images
-        return len(self.list_example_filenames) * self.num_images_per_example // 4
-        #return len(self.list_example_filenames) * self.num_images_per_example
+        return len(self.list_example_filenames) * self.num_images_per_example
 
     def __getitem__(self, index):
         '''Generate one example of data
@@ -932,7 +946,8 @@ class CostarBlockStackingDataset(Dataset):
         # list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
         # Generate data
         self.infer_index = self.infer_index + 1        
-        if self.data_features_to_extract == ['image_m_image_n'] or self.data_features_to_extract == ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper']:
+        if self.data_features_to_extract == ['image_m_image_n'] or self.data_features_to_extract == ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper'] \
+                or self.data_features_to_extract == ['image_m_vec_m_image_n_vec_n']:
             # Return a sample from stack of frames and joints.
             # X1 is of shape (No. of channels, heigh, width)
             # X2 is of shape (No. of channels, heigh, width) if self.data_features_to_extract == ['image_m_image_n'] OR
@@ -940,9 +955,14 @@ class CostarBlockStackingDataset(Dataset):
             # y is 0 when visualize_embeddings is true otherwise, y is the interval between X1 and X2
             if self.visualize_embeddings:
                 X1, X2, y = self.__data_generation(self.list_example_filenames, index)
+            elif self.data_features_to_extract == ['image_m_vec_m_image_n_vec_n']:
+                im1, im2, j1, j2, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example],
+                        self.infer_index)
+                return im1, im2, j1, j2, y
             else:
                 X1, X2, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
-            return X1, X2,y
+
+            return X1, X2, y
         else:
             X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
             
@@ -1074,12 +1094,12 @@ class CostarBlockStackingDataset(Dataset):
                             rgb_images = list([data['image'][images_index]])
                         else:
                             # TODO(adit98) set length here
-                            frame_index_1, frame_index_2, interval = generate_training_data_indices(num_frames, 4)
-                            rgb_images = list([data['image'][frame_index_1:frame_index_1 + i + 1] for i in range(4)] + \
-                                    [data['image'][frame_index_2:frame_index_2 + i + 1] for i in range(4)])
-                            #frame_index_1, frame_index_2, interval = generate_training_data_indices(num_frames, 1)
-                            #rgb_images = list([data['image'][frame_index_1:frame_index_1 + i + 1] for i in range(1)] + \
-                            #        [data['image'][frame_index_2:frame_index_2 + i + 1] for i in range(1)])
+                            #frame_index_1, frame_index_2, interval = generate_training_data_indices(num_frames, 4)
+                            #rgb_images = list([data['image'][frame_index_1:frame_index_1 + i + 1] for i in range(4)] + \
+                            #        [data['image'][frame_index_2:frame_index_2 + i + 1] for i in range(4)])
+                            frame_index_1, frame_index_2, interval = generate_training_data_indices(num_frames, 1)
+                            rgb_images = list([data['image'][frame_index_1:frame_index_1 + i + 1] for i in range(1)] + \
+                                    [data['image'][frame_index_2:frame_index_2 + i + 1] for i in range(1)])
                         rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW') 
                     elif self.data_features_to_extract is not None and 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' in self.data_features_to_extract:
                         if self.visualize_embeddings:
@@ -1107,16 +1127,55 @@ class CostarBlockStackingDataset(Dataset):
                                 + self.num_joints_concatenated] for i in range(4)])
                         joints = np.concatenate([joints_1, joints_2, joints_3, gripper_states], axis=-1)
 
+                    elif self.data_features_to_extract is not None and 'image_m_vec_m_image_n_vec_n' in self.data_features_to_extract:
+                        if self.visualize_embeddings:
+                            rgb_images = list([data['image'][images_index]])
+                            depth_images = list([data['depth_image'][images_index]])
+
+                            # get joint/gripper angles
+                            joints = np.concatenate([data[self.pose_name][images_index],
+                                data['q'][images_index], data['dq'][images_index],
+                                np.array([data['gripper'][images_index]])])[:, None].T
+
+                        else:
+                            # TODO(adit98) set length here
+                            index1, index2, interval = generate_training_data_indices(num_frames, 1)
+                            rgb_images = list([data['image'][index1], data['image'][index2]])
+                            depth_images = list([data['depth_image'][index1], data['depth_image'][index2]])
+
+                            # get joint/gripper angles
+                            joints_init = np.concatenate([data[self.pose_name][index1],
+                                data['q'][index1], data['dq'][index1],
+                                np.array([data['gripper'][index1]])])
+                            joints_final = np.concatenate([data[self.pose_name][index2],
+                                data['q'][index2], data['dq'][index2],
+                                np.array([data['gripper'][index2]])])
+
+                            joints = np.stack([joints_init, joints_final])
+
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW')
+                        depth_images = ConvertImageListToNumpy(depth_images, format='numpy', data_format='NCHW')
+
+                        # concatenate rgb_images with depth channel
+                        rgb_images = np.concatenate([rgb_images, np.expand_dims(np.average(depth_images,
+                            axis=1, weights=[256, 1, 1/256]), axis=1)], axis=1)
+
+                        #joints_init = np.concatenate([data[self.pose_name][index1], data['q'][index1],
+                        #    np.array([data['gripper'][index1]])])
+                        #joints_final = np.concatenate([data[self.pose_name][index2],
+                        #    data['q'][index2], np.array([data['gripper'][index2]])])
+
                     else:
                         rgb_images = list(data['image'][img_indices])
                         rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
+
                     if self.blend:
                         # TODO(ahundt) move this to after the resize loop for a speedup
                         blended_image = blend_image_sequence(rgb_images)
                         rgb_images = [rgb_images[0], blended_image]
                     # resize using skimage
                     rgb_images_resized = []
-                    for k, images in enumerate(rgb_images):
+                    for k, image in enumerate(rgb_images):
                         if (self.is_training and self.random_augmentation is not None and
                                 self.random_shift and np.random.random() > self.random_augmentation):
                             # apply random shift to the images before resizing
@@ -1126,7 +1185,7 @@ class CostarBlockStackingDataset(Dataset):
                                                   row_axis=0, col_axis=1, channel_axis=2)
                         # TODO(ahundt) improve crop/resize to match cornell_grasp_dataset_reader
                         if self.output_shape is not None:
-                            resized_image = resize(images, self.output_shape, mode='constant', preserve_range=True, order=1)
+                            resized_image = resize(image, self.output_shape, mode='constant', preserve_range=True, order=1)
                         else:
                             resized_image = images
                         if self.is_training and self.random_augmentation:
@@ -1135,7 +1194,8 @@ class CostarBlockStackingDataset(Dataset):
                         rgb_images_resized.append(resized_image)
                     if (self.data_features_to_extract is not None and 
                         ('image_m_image_n' not in self.data_features_to_extract and
-                         'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' not in self.data_features_to_extract)):
+                         'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' not in self.data_features_to_extract and
+                         'image_m_vec_m_image_n_vec_n' not in self.data_features_to_extract)):
                         init_images.append(rgb_images_resized[0])
                         current_images.append(rgb_images_resized[1])
                         poses.append(np.array(data[self.pose_name][indices[1:]])[0])
@@ -1212,8 +1272,8 @@ class CostarBlockStackingDataset(Dataset):
                 #print(np.concatenate(rgb_images_resized[:4]).shape)
                 normalized_frames = encode_action_and_images(data_features_to_extract='image_m_image_n',
                                     poses=None, action_labels=None,
-                                    init_images=np.concatenate(rgb_images_resized[:4]),
-                                    current_images=np.concatenate(rgb_images_resized[4:]))
+                                    init_images=np.concatenate(rgb_images_resized[:1]),
+                                    current_images=np.concatenate(rgb_images_resized[1:]))
                 return normalized_frames[0], normalized_frames[1], interval
                 #normalized_frames = encode_action_and_images(data_features_to_extract='image_m_image_n',
                 #                    poses=None, action_labels=None,
@@ -1223,8 +1283,22 @@ class CostarBlockStackingDataset(Dataset):
             if (self.data_features_to_extract is not None and 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' in self.data_features_to_extract):
                 [normalized_frame, joint_encoded] = encode_action_and_images(data_features_to_extract='image_n_vec_xyz_aaxyz_nsc_q_dq_gripper',
                                                     poses=joints, action_labels=None,
-                                                    init_images=np.concatenate(rgb_images_resized[:4]), current_images=None)
+                                                    init_images=np.concatenate(rgb_images_resized[:1]), current_images=None)
                 return (normalized_frame, joint_encoded, interval)
+
+            if self.data_features_to_extract is not None and 'image_m_vec_m_image_n_vec_n' in self.data_features_to_extract:
+                if self.visualize_embeddings:
+                    img, vec = encode_action_and_images(data_features_to_extract='image_m_vec_m_image_n_vec_n',
+                                    poses=joints, action_labels=None,
+                                    init_images=rgb_images_resized[0],
+                                    current_images=None)
+                    return img, vec, 0
+                # TODO(adit98) modify this to use cmd line arg
+                normalized_frames, joints = encode_action_and_images(data_features_to_extract='image_m_vec_m_image_n_vec_n',
+                                    poses=joints, action_labels=None,
+                                    init_images=np.concatenate(rgb_images_resized[:1]),
+                                    current_images=np.concatenate(rgb_images_resized[1:]))
+                return normalized_frames[0], normalized_frames[1], joints[0], joints[1], interval
 
             action_labels = np.array(action_labels)
             # note: we disabled keras format of numpy arrays
