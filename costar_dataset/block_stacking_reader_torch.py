@@ -883,6 +883,7 @@ class CostarBlockStackingDataset(Dataset):
                 label_features = ['time_intervals']
             elif feature_mode == 'spot':
                 data_features = ['image_m_depth_m']
+                label_features = ['time_intervals']
 
         if visualize_embeddings:
             # Create separate dataset for each video listed in the file.
