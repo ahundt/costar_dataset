@@ -1275,8 +1275,8 @@ class CostarBlockStackingDataset(Dataset):
 
             if (self.data_features_to_extract is not None and 'image_m_depth_m' in self.data_features_to_extract):
                 if self.visualize_embeddings:
-                    normalized_rgb = preprocess_numpy_input(np.array(rgb_images_resized[0], dtype=np.double))
-                    normalized_depth = preprocess_numpy_input(np.array(rgb_images_resized[1], dtype=np.double))
+                    normalized_rgb = preprocess_numpy_input(np.array(rgb_images_resized[0], dtype=np.float32))
+                    normalized_depth = preprocess_numpy_input(np.array(rgb_images_resized[1], dtype=np.float32))
                     return normalized_rgb, normalized_depth, 0
 
             if (self.data_features_to_extract is not None and 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' in self.data_features_to_extract):
