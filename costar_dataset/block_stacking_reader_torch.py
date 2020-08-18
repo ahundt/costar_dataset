@@ -1173,7 +1173,6 @@ class CostarBlockStackingDataset(Dataset):
                             raise NotImplementedError
 
                         rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW') 
-                        depth_images = ConvertImageListToNumpy(depth_images, format='numpy', data_format='NCHW') 
 
                     else:
                         rgb_images = list(data['image'][img_indices])
