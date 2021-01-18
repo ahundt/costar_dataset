@@ -1,3 +1,11 @@
+###################################################
+# script for downloading only the success.h5f files 
+# usage: 
+#   python download_success.py <destination_dir> 
+# requires: 
+#   python >= 3.6
+###################################################
+
 import subprocess 
 import pathlib 
 import time 
