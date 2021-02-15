@@ -19,10 +19,11 @@ import costar_dataset.hypertree_pose_metrics_torch as hypertree_pose_metrics
 import torch
 from torch.utils.data import Dataset, DataLoader
 import scipy
+import random
 
-COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy']
+COSTAR_SET_NAMES = ['blocks_only', 'blocks_with_plush_toy', 'blocks_only_small']
 COSTAR_SUBSET_NAMES = ['success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure']
-COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward']
+COSTAR_FEATURE_MODES = ['translation_only', 'rotation_only', 'stacking_reward', 'time_difference_images', 'cross_modal_embeddings', 'hybrid_embeddings']
 
 
 def random_eraser(input_img, p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255, pixel_level=True):
@@ -302,8 +303,15 @@ def encode_action_and_images(
     """ Given an action and images, return the combined input object performing prediction with keras.
 
     data_features_to_extract: A string identifier for the encoding to use for the actions and images.
-        Options include: 'image_0_image_n_vec_xyz_aaxyz_nsc_15', 'image_0_image_n_vec_xyz_10',
-            'current_xyz_aaxyz_nsc_8', 'current_xyz_3', 'proposed_goal_xyz_aaxyz_nsc_8'.
+        Options include: 
+            'image_0_image_n_vec_xyz_aaxyz_nsc_15' - 
+            'image_0_image_n_vec_xyz_10' - 
+            'current_xyz_aaxyz_nsc_8' -  
+            'current_xyz_3' -  
+            'proposed_goal_xyz_aaxyz_nsc_8' - 
+            'image_m_image_n' - two images each of shape CHW at time stamps m and n respectively.  
+            'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' - an image and contiguous M(default 10) vectors that comprises of encoded pose data, 
+                                                       6 joint angles of the UR5, change in joint angle and state of the gripper.
     action_labels: batch of already one-hot or floating point encoded action label
     init_images: batch of clear view images, the initial in the time series.
         These should already be the appropriate size and rgb values in the range [0, 255].
@@ -317,11 +325,45 @@ def encode_action_and_images(
     single_batch_cube: False will keep images and vector data in a tuple.
        True will tile the vector data to be the same shape as the image data, and concatenate it all into a cube of data.
     """
+    if data_features_to_extract == 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper':
+        init_images = preprocess_numpy_input(np.array(init_images, dtype=np.double))
+        poses = np.array(poses, dtype=np.float32)
+        encoded_poses = []
+        # TODO(adit98) fix this part
+        for i in range(poses.shape[0]):
+            encoded_pose = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
+                    poses[i, :, :7], random_augmentation=random_augmentation)
 
-    action_labels = np.array(action_labels)
-    init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
-    current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
-    poses = np.array(poses, dtype=np.float32)
+            encoded_pose = np.concatenate([encoded_pose, poses[i, :, 7:]], axis=-1)
+            encoded_poses.append(encoded_pose)
+
+        encoded_poses = np.stack(encoded_poses)
+        #encoded_poses = encoded_poses[np.newaxis]
+        return [init_images, encoded_poses]
+    elif data_features_to_extract == 'image_m_image_n':
+        init_images = preprocess_numpy_input(np.stack(init_images).astype(np.double))
+        current_images = preprocess_numpy_input(np.stack(current_images).astype(np.double))
+        return [init_images, current_images]
+    elif data_features_to_extract == 'image_m_vec_m_image_n_vec_n':
+        init_images = preprocess_numpy_input(np.stack(init_images).astype(np.double))
+        if current_images is not None:
+            current_images = preprocess_numpy_input(np.stack(current_images).astype(np.double))
+        poses = np.array(poses, dtype=np.float32)
+        encoded_poses = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
+                poses[:, :7], random_augmentation=random_augmentation)
+        encoded_poses = np.concatenate([encoded_poses, poses[:, 7:]], axis=-1)
+
+        # TODO(adit98) modify to use cmd line arg
+        if current_images is not None and encoded_poses.shape[0] > 1:
+            return [init_images, current_images], [encoded_poses[:1].flatten(), encoded_poses[1:].flatten()]
+ 
+        return init_images, encoded_poses.flatten()
+
+    else:
+        action_labels = np.array(action_labels)
+        init_images = preprocess_numpy_input(np.array(init_images, dtype=np.float32))
+        current_images = preprocess_numpy_input(np.array(current_images, dtype=np.float32))
+        poses = np.array(poses, dtype=np.float32)
 
     # print('poses shape: ' + str(poses.shape))
     encoded_poses = hypertree_pose_metrics.batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(
@@ -413,8 +455,8 @@ def preprocess_numpy_input_tf(x):
     if not issubclass(x.dtype.type, np.floating):
         x = x.astype(np.float32, copy=False)
 
-    x /= 127.5
-    x -= 1.
+    x /= 255.0
+    #x -= 1.
     return x
 
 
@@ -588,7 +630,38 @@ def transform_matrix_offset_center(matrix, x, y):
     transform_matrix = np.dot(np.dot(offset_matrix, matrix), reset_matrix)
     return transform_matrix
 
+def generate_training_data_indices(num_frames, length = 1):
+    """
+        Generate training data indices for 'time_difference_images' and 'cross_modal_embeddings' feature_mode
+        Args: num_frames - int - No. of frames in video
+              length - int - No. of contiguous joint vectors to be concatenated. For 'time_difference_images', length = 1. 
+        Returns: index of frame 1 
+                 index of frame 2 (for 'time_difference_images') or joint vector (for 'cross_modal_embeddings')
+    """
+    # TODO(adit98) change back
+    #interval = np.random.choice(3)
+    #if interval == 0:
+    #    distance = np.random.choice(5)
+    #elif interval == 1:
+    #    distance = np.random.choice(np.arange(5, 20 + 1))
 
+    interval = np.random.choice(4)
+    if interval == 0:
+        distance = np.random.choice(np.arange(0, 2 + 1))
+    elif interval == 1:
+        distance = np.random.choice(np.arange(3, 5 + 1))
+    elif interval == 2:
+        distance = np.random.choice(np.arange(6, 20 + 1))
+    else:
+        distance = np.random.choice(np.arange(21, 150 + 1))
+
+    if (num_frames - distance - length) < 0:
+        raise ValueError('Length of video is less than 150 frames')
+
+    frame_index = np.random.randint(0, num_frames - distance - length)
+    joint_index = frame_index + distance
+    return frame_index, joint_index, interval
+    
 class CostarBlockStackingDataset(Dataset):
     def __init__(self, list_example_filenames,
                  label_features_to_extract=None, data_features_to_extract=None,
@@ -601,6 +674,7 @@ class CostarBlockStackingDataset(Dataset):
                  num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                  pose_name='pose_gripper_center',
                  force_random_training_pose_augmentation=None,
+                 visualize_embeddings=False,
                  # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
                  single_batch_cube=False):
         '''Initialization
@@ -619,6 +693,9 @@ class CostarBlockStackingDataset(Dataset):
             'proposed_goal_xyz_aaxyz_nsc_8' a pose at the end of the current action (for classification cases),
             'image_0_image_n_vec_xyz_nxygrid_12' another giant cube without rotation and with explicit normalized xy coordinates,
             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' another giant cube with rotation and explicit normalized xy coordinates.
+            'image_m_image_n' two images each of shape CHW at time stamps m and n respectively.  
+            'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' an image and contiguous M(default 10) vectors that comprises of -
+             encoded pose data, 6 joint angles of the UR5, change in joint angle and state of the gripper.
         random_augmentation: None or a float value between 0 and 1 indiciating how frequently random augmentation should be applied.
         num_images_per_example: The number of images in each example varies, so we simply sample in proportion to an estimated number
             of images per example. Set this number high if you want to visit more images in the same example.
@@ -632,6 +709,18 @@ class CostarBlockStackingDataset(Dataset):
                 of the robot, which is the base of the gripper wrist.
             'pose_gripper_center' is a point in between the robotiq C type gripping plates when the gripper is open
                 with the same orientation as pose.
+        visualize_embeddings: If you want to plot t-SNE, to check embeddings for a set of videos, set this mode to True.
+                    Works only for feature modes: 'time_difference_images' and 'cross_modal_embeddings'.
+                    This mode will create a CostarBlockStackingDataset Dataset for each video listed in the 'txt_filename' file.
+                    The Dataloader for these Datasets is then used to iterate over the frames and joint vectors of the videos to create embeddings,
+                    which can then be plotted using tensorboardX. 
+                    Example usage is in visualize_embeddings.py in sharpDARTS.                            
+                    For feature_mode = 'time_difference_images', returns a sample image of shape - (No. of channels, height, width)
+                    For feature_mode = 'cross_modal_embeddings', returns a sample image of shape - (No. of channels, height, width) and 
+                                                                         a numpy array of joint_vectors of shape - (1, self.num_joints_concatenated, 21)
+                                                                            where self.num_joints_concatenated is the No. of contiguous joint vectors concatenated 
+                    For feature_mode = 'hybrid_embeddings', returns 2 pairs of a sample image of shape - (No. of channels, height, width) and
+                                                                         a numpy array of joint_vectors of shape - (1, self.num_joints_concatenated, 21)
         single_batch_cube: False will keep images and vector data in a tuple.
            True will tile the vector data to be the same shape as the image data, and concatenate it all into a cube of data.
 
@@ -651,6 +740,11 @@ class CostarBlockStackingDataset(Dataset):
                 path = f.split('/')
                 path[:3] = ['~', '.keras', 'datasets']
                 list_example_filenames[i] = os.path.join(*path)
+        if visualize_embeddings:
+            # modify path
+            path_split = list_example_filenames.split('/')
+            path_split[2] = 'datasets'
+            list_example_filenames = os.path.join('/home/ubuntu/costar/home', '/'.join(path_split[1:]))
 
         self.list_example_filenames = list_example_filenames
         # self.shuffle = shuffle
@@ -694,7 +788,11 @@ class CostarBlockStackingDataset(Dataset):
         self.num_images_per_example = num_images_per_example
         if self.inference_mode is True:
             self.list_example_filenames = inference_mode_gen(self.list_example_filenames)
-
+        # If you want to plot t-SNE, to check embeddings. applicable only for feature mode 'cross_modal_embeddings' and 'time_difference_images'.
+        self.visualize_embeddings = visualize_embeddings
+        # No. of contiguous joint vectors to be concatenated, applicable only for feature mode 'cross_modal_embeddings'.
+        self.num_joints_concatenated = 10
+                    
     @classmethod
     def from_standard_txt(cls, root, version, set_name, subset_name, split, feature_mode=None,
                           total_actions_available=41,
@@ -706,6 +804,7 @@ class CostarBlockStackingDataset(Dataset):
                           num_images_per_example=200, verbose=0, inference_mode=False, one_hot_encoding=True,
                           pose_name='pose_gripper_center',
                           force_random_training_pose_augmentation=None,
+                          visualize_embeddings=False,
                           # TODO(ahundt) make single_batch_cube default to false, fix all code deps and bugs first
                           single_batch_cube=False):
         '''
@@ -724,14 +823,21 @@ class CostarBlockStackingDataset(Dataset):
         :param subset_name: The subset that will be loaded.
                             Currently one of {'success_only', 'error_failure_only', 'task_failure_only', 'task_and_error_failure'}.
         :param split: The split that will be loaded. One of {'train', 'test', 'val'}
-        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features'}. Correspond to different
+        :param feature_mode: One of {'translation_only', 'rotation_only','stacking_reward', 'all_features', 'time_difference_images', 'cross_modal_embeddings'}. Correspond to different
                              feature combos that the returned data will have. If leave blank, will default to 'all_features'
                              Feature combo and their corresponding data and label features:
                              - 'all_features': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17', label = grasp_goal_xyz_aaxyz_nsc_8'
                              - 'translation_only': data = 'image_0_image_n_vec_xyz_nxygrid_12', label = 'grasp_goal_xyz_3'
                              - 'rotation_only': data = 'image_0_image_n_vec_xyz_aaxyz_nsc_15', label = 'grasp_goal_aaxyz_nsc_5'
                              - 'stacking_reward': data = 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25', label = 'stacking_reward'
+                             - 'time_difference_images': data = 'image_m_image_n', label = 'time_intervals'
+                             - 'cross_modal_embeddings': data = 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper', label = 'cross_modal_time_intervals'
                              See the docstring for __init__ for details on data_features_to_extract and label_features_to_extract.
+        :param visualize_embeddings:If you want to plot t-SNE, to check embeddings for a set of videos, set this mode to True. 
+                                    This mode will create a CostarBlockStackingDataset object for each video listed in the 'txt_filename' file.
+                                    The Dataloader for these Datasets is then used to iterate over the frames and joint vectors of the videos to create embeddings,
+                                    which can then be plotted using tensorboardX. 
+                                    Example usage is in visualize_embeddings.py in sharpDARTS.                            
         :return: The class object for CostarBlockStackingDataset that can be fed into a DataLoader of choice to get train/test/val queues.
         '''
         if set_name not in COSTAR_SET_NAMES:
@@ -766,27 +872,67 @@ class CostarBlockStackingDataset(Dataset):
             elif feature_mode == 'stacking_reward':
                 data_features = ['image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25']
                 label_features = ['stacking_reward']
+            elif feature_mode == 'time_difference_images':
+                data_features = ['image_m_image_n']
+                label_features = ['time_intervals']
+            elif feature_mode == 'cross_modal_embeddings':
+                data_features = ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper']
+                label_features = ['cross_modal_time_intervals']
+            elif feature_mode == 'hybrid_embeddings':
+                data_features = ['image_m_vec_m_image_n_vec_n']
+                label_features = ['time_intervals']
 
-        data = cls(
-            data_filenames,
-            label_features_to_extract=label_features, data_features_to_extract=data_features,
-            total_actions_available=total_actions_available,
-            seed=seed, random_state=random_state,
-            is_training=is_training, random_augmentation=random_augmentation,
-            random_shift=random_shift,
-            output_shape=output_shape,
-            blend_previous_goal_images=blend_previous_goal_images,
-            num_images_per_example=num_images_per_example,
-            verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
-            pose_name=pose_name,
-            force_random_training_pose_augmentation=force_random_training_pose_augmentation,
-            single_batch_cube=single_batch_cube)
+        if visualize_embeddings:
+            # Create separate dataset for each video listed in the file.
+            data = [cls(
+                data_filename,
+                label_features_to_extract=label_features, data_features_to_extract=data_features,
+                total_actions_available=total_actions_available,
+                seed=seed, random_state=random_state,
+                is_training=is_training, random_augmentation=random_augmentation,
+                random_shift=random_shift,
+                output_shape=output_shape,
+                blend_previous_goal_images=blend_previous_goal_images,
+                num_images_per_example=num_images_per_example,
+                verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
+                pose_name=pose_name,
+                force_random_training_pose_augmentation=force_random_training_pose_augmentation,
+                visualize_embeddings=visualize_embeddings,
+                single_batch_cube=single_batch_cube) for data_filename in data_filenames]
+        else:
+            data = cls(
+                data_filenames,
+                label_features_to_extract=label_features, data_features_to_extract=data_features,
+                total_actions_available=total_actions_available,
+                seed=seed, random_state=random_state,
+                is_training=is_training, random_augmentation=random_augmentation,
+                random_shift=random_shift,
+                output_shape=output_shape,
+                blend_previous_goal_images=blend_previous_goal_images,
+                num_images_per_example=num_images_per_example,
+                verbose=verbose, inference_mode=inference_mode, one_hot_encoding=one_hot_encoding,
+                pose_name=pose_name,
+                force_random_training_pose_augmentation=force_random_training_pose_augmentation,
+                visualize_embeddings=visualize_embeddings,
+                single_batch_cube=single_batch_cube)
 
         return data
 
     def __len__(self):
         """Return the lenth of file names
         """
+        if self.visualize_embeddings:
+            # Return the number of frames in video if visualizing embeddings by plotting t-SNE
+            with h5py.File(self.list_example_filenames, 'r') as data:
+                if self.data_features_to_extract == ['image_m_image_n']:
+                    return data['image'].shape[0]
+                elif self.data_features_to_extract == ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper']:
+                    # reduce the number of frames being considered as images, to accomodate concatenated joint vectors,
+                    # avoids index out of range. 
+                    return data['image'].shape[0] - self.num_joints_concatenated
+                elif self.data_features_to_extract == ['image_m_vec_m_image_n_vec_n']:
+                    return data['image'].shape[0]
+ 
         return len(self.list_example_filenames) * self.num_images_per_example
 
     def __getitem__(self, index):
@@ -799,10 +945,28 @@ class CostarBlockStackingDataset(Dataset):
         # # Find list of example_filenames
         # list_example_filenames_temp = [self.list_example_filenames[k] for k in indexes]
         # Generate data
-        self.infer_index = self.infer_index + 1
-        X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
+        self.infer_index = self.infer_index + 1        
+        if self.data_features_to_extract == ['image_m_image_n'] or self.data_features_to_extract == ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper'] \
+                or self.data_features_to_extract == ['image_m_vec_m_image_n_vec_n']:
+            # Return a sample from stack of frames and joints.
+            # X1 is of shape (No. of channels, heigh, width)
+            # X2 is of shape (No. of channels, heigh, width) if self.data_features_to_extract == ['image_m_image_n'] OR
+            #                (1, self.num_joints_concatenated, 21) if self.data_features_to_extract == ['image_n_vec_xyz_aaxyz_nsc_q_dq_gripper']
+            # y is 0 when visualize_embeddings is true otherwise, y is the interval between X1 and X2
+            if self.visualize_embeddings:
+                X1, X2, y = self.__data_generation(self.list_example_filenames, index)
+            elif self.data_features_to_extract == ['image_m_vec_m_image_n_vec_n']:
+                im1, im2, j1, j2, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example],
+                        self.infer_index)
+                return im1, im2, j1, j2, y
+            else:
+                X1, X2, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
 
-        return X, y
+            return X1, X2, y
+        else:
+            X, y = self.__data_generation(self.list_example_filenames[index//self.num_images_per_example], self.infer_index)
+            
+            return X, y
 
     def get_num_images_per_example(self):
         """ Get the estimated images per example.
@@ -923,15 +1087,95 @@ class CostarBlockStackingDataset(Dataset):
                     if self.verbose > 0:
                         print("Indices --", indices)
                         print('img_indices: ' + str(img_indices))
-                    rgb_images = list(data['image'][img_indices])
-                    rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
+                    
+                    num_frames = data['image'].shape[0]  
+                    if self.data_features_to_extract is not None and 'image_m_image_n' in self.data_features_to_extract:
+                        if self.visualize_embeddings:
+                            rgb_images = list([data['image'][images_index]])
+                        else:
+                            # TODO(adit98) set length here
+                            #frame_index_1, frame_index_2, interval = generate_training_data_indices(num_frames, 4)
+                            #rgb_images = list([data['image'][frame_index_1:frame_index_1 + i + 1] for i in range(4)] + \
+                            #        [data['image'][frame_index_2:frame_index_2 + i + 1] for i in range(4)])
+                            frame_index_1, frame_index_2, interval = generate_training_data_indices(num_frames, 1)
+                            rgb_images = list([data['image'][frame_index_1:frame_index_1 + i + 1] for i in range(1)] + \
+                                    [data['image'][frame_index_2:frame_index_2 + i + 1] for i in range(1)])
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW') 
+                    elif self.data_features_to_extract is not None and 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' in self.data_features_to_extract:
+                        if self.visualize_embeddings:
+                            frame_index = images_index
+                            joint_index = images_index
+                            interval = 0
+                        else:
+                            #frame_index, joint_index, interval = generate_training_data_indices(num_frames, self.num_joints_concatenated) 
+                            # TODO(adit98) set length here
+                            frame_index, joint_index, interval = generate_training_data_indices(num_frames,
+                                    self.num_joints_concatenated + 4)
+
+                        # TODO(adit98) set length here
+                        rgb_images = list([data['image'][frame_index:frame_index + i + 1] for i in range(4)])
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW')
+
+                        gripper_states = list([np.array(data['gripper'][joint_index + i:joint_index + i \
+                                + self.num_joints_concatenated]) for i in range(4)])
+                        gripper_states = np.expand_dims(np.stack(gripper_states), -1)
+                        joints_1 = np.stack([data[self.pose_name][joint_index + i:joint_index + i \
+                                + self.num_joints_concatenated] for i in range(4)])
+                        joints_2 = np.stack([data['q'][joint_index + i:joint_index + i \
+                                + self.num_joints_concatenated] for i in range(4)])
+                        joints_3 = np.stack([data['dq'][joint_index + i:joint_index + i \
+                                + self.num_joints_concatenated] for i in range(4)])
+                        joints = np.concatenate([joints_1, joints_2, joints_3, gripper_states], axis=-1)
+
+                    elif self.data_features_to_extract is not None and 'image_m_vec_m_image_n_vec_n' in self.data_features_to_extract:
+                        if self.visualize_embeddings:
+                            rgb_images = list([data['image'][images_index]])
+                            depth_images = list([data['depth_image'][images_index]])
+
+                            # get joint/gripper angles
+                            joints = np.concatenate([data[self.pose_name][images_index],
+                                data['q'][images_index], data['dq'][images_index],
+                                np.array([data['gripper'][images_index]])])[:, None].T
+
+                        else:
+                            # TODO(adit98) set length here
+                            index1, index2, interval = generate_training_data_indices(num_frames, 1)
+                            rgb_images = list([data['image'][index1], data['image'][index2]])
+                            depth_images = list([data['depth_image'][index1], data['depth_image'][index2]])
+
+                            # get joint/gripper angles
+                            joints_init = np.concatenate([data[self.pose_name][index1],
+                                data['q'][index1], data['dq'][index1],
+                                np.array([data['gripper'][index1]])])
+                            joints_final = np.concatenate([data[self.pose_name][index2],
+                                data['q'][index2], data['dq'][index2],
+                                np.array([data['gripper'][index2]])])
+
+                            joints = np.stack([joints_init, joints_final])
+
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy', data_format='NCHW')
+                        depth_images = ConvertImageListToNumpy(depth_images, format='numpy', data_format='NCHW')
+
+                        # concatenate rgb_images with depth channel
+                        rgb_images = np.concatenate([rgb_images, np.expand_dims(np.average(depth_images,
+                            axis=1, weights=[256, 1, 1/256]), axis=1)], axis=1)
+
+                        #joints_init = np.concatenate([data[self.pose_name][index1], data['q'][index1],
+                        #    np.array([data['gripper'][index1]])])
+                        #joints_final = np.concatenate([data[self.pose_name][index2],
+                        #    data['q'][index2], np.array([data['gripper'][index2]])])
+
+                    else:
+                        rgb_images = list(data['image'][img_indices])
+                        rgb_images = ConvertImageListToNumpy(rgb_images, format='numpy')
+
                     if self.blend:
                         # TODO(ahundt) move this to after the resize loop for a speedup
                         blended_image = blend_image_sequence(rgb_images)
                         rgb_images = [rgb_images[0], blended_image]
                     # resize using skimage
                     rgb_images_resized = []
-                    for k, images in enumerate(rgb_images):
+                    for k, image in enumerate(rgb_images):
                         if (self.is_training and self.random_augmentation is not None and
                                 self.random_shift and np.random.random() > self.random_augmentation):
                             # apply random shift to the images before resizing
@@ -941,81 +1185,120 @@ class CostarBlockStackingDataset(Dataset):
                                                   row_axis=0, col_axis=1, channel_axis=2)
                         # TODO(ahundt) improve crop/resize to match cornell_grasp_dataset_reader
                         if self.output_shape is not None:
-                            resized_image = resize(images, self.output_shape, mode='constant', preserve_range=True, order=1)
+                            resized_image = resize(image, self.output_shape, mode='constant', preserve_range=True, order=1)
                         else:
                             resized_image = images
                         if self.is_training and self.random_augmentation:
                             # do some image augmentation with random erasing & cutout
                             resized_image = random_eraser(resized_image)
                         rgb_images_resized.append(resized_image)
+                    if (self.data_features_to_extract is not None and 
+                        ('image_m_image_n' not in self.data_features_to_extract and
+                         'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' not in self.data_features_to_extract and
+                         'image_m_vec_m_image_n_vec_n' not in self.data_features_to_extract)):
+                        init_images.append(rgb_images_resized[0])
+                        current_images.append(rgb_images_resized[1])
+                        poses.append(np.array(data[self.pose_name][indices[1:]])[0])
+                        if(self.data_features_to_extract is not None and 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract):
+                            next_goal_idx = all_goal_ids[indices[1:][0]]
+                            goal_pose.append(np.array(data[self.pose_name][next_goal_idx]))
+                            print("final pose added", goal_pose)
+                            current_stacking_reward = stacking_reward[indices[1]]
+                            print("reward estimate", current_stacking_reward)
+                        # x = x + tuple([rgb_images[indices]])
+                        # x = x + tuple([np.array(data[self.pose_name])[indices]])
 
-                    init_images.append(rgb_images_resized[0])
-                    current_images.append(rgb_images_resized[1])
-                    poses.append(np.array(data[self.pose_name][indices[1:]])[0])
-                    if(self.data_features_to_extract is not None and 'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract):
-                        next_goal_idx = all_goal_ids[indices[1:][0]]
-                        goal_pose.append(np.array(data[self.pose_name][next_goal_idx]))
-                        print("final pose added", goal_pose)
-                        current_stacking_reward = stacking_reward[indices[1]]
-                        print("reward estimate", current_stacking_reward)
-                    # x = x + tuple([rgb_images[indices]])
-                    # x = x + tuple([np.array(data[self.pose_name])[indices]])
+                        # WARNING: IF YOU CHANGE THIS ACTION ENCODING CODE BELOW, ALSO CHANGE encode_action() function ABOVE
+                        if (self.data_features_to_extract is not None and
+                                ('image_0_image_n_vec_xyz_aaxyz_nsc_15' in self.data_features_to_extract or
+                                'image_0_image_n_vec_xyz_nxygrid_12' in self.data_features_to_extract or
+                                'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' in self.data_features_to_extract or
+                                'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract) and not self.one_hot_encoding):
+                            # normalized floating point encoding of action vector
+                            # from 0 to 1 in a single float which still becomes
+                            # a 2d array of dimension batch_size x 1
+                            # np.expand_dims(data['gripper_action_label'][indices[1:]], axis=-1) / self.total_actions_available
+                            for j in indices[1:]:
+                                action = [float(data['gripper_action_label'][j] / self.total_actions_available)]
+                                action_labels.append(action)
+                        else:
+                            # one hot encoding
+                            for j in indices[1:]:
+                                # generate the action label one-hot encoding
+                                action = np.zeros(self.total_actions_available)
+                                action[data['gripper_action_label'][j]] = 1
+                                action_labels.append(action)
+                        # action_labels = np.array(action_labels)
 
-                    # WARNING: IF YOU CHANGE THIS ACTION ENCODING CODE BELOW, ALSO CHANGE encode_action() function ABOVE
-                    if (self.data_features_to_extract is not None and
-                            ('image_0_image_n_vec_xyz_aaxyz_nsc_15' in self.data_features_to_extract or
-                             'image_0_image_n_vec_xyz_nxygrid_12' in self.data_features_to_extract or
-                             'image_0_image_n_vec_xyz_aaxyz_nsc_nxygrid_17' in self.data_features_to_extract or
-                             'image_0_image_n_vec_0_vec_n_xyz_aaxyz_nsc_nxygrid_25' in self.data_features_to_extract) and not self.one_hot_encoding):
-                        # normalized floating point encoding of action vector
-                        # from 0 to 1 in a single float which still becomes
-                        # a 2d array of dimension batch_size x 1
-                        # np.expand_dims(data['gripper_action_label'][indices[1:]], axis=-1) / self.total_actions_available
-                        for j in indices[1:]:
-                            action = [float(data['gripper_action_label'][j] / self.total_actions_available)]
-                            action_labels.append(action)
-                    else:
-                        # one hot encoding
-                        for j in indices[1:]:
-                            # generate the action label one-hot encoding
-                            action = np.zeros(self.total_actions_available)
-                            action[data['gripper_action_label'][j]] = 1
-                            action_labels.append(action)
-                    # action_labels = np.array(action_labels)
+                        # print(action_labels)
+                        # x = x + tuple([action_labels])
+                        # X.append(x)
+                        # action_labels = np.unique(data['gripper_action_label'])
+                        # print(np.array(data['labels_to_name']).shape)
+                        # X.append(np.array(data['pose'])[indices])
 
-                    # print(action_labels)
-                    # x = x + tuple([action_labels])
-                    # X.append(x)
-                    # action_labels = np.unique(data['gripper_action_label'])
-                    # print(np.array(data['labels_to_name']).shape)
-                    # X.append(np.array(data['pose'])[indices])
-
-                    # Store class
-                    label = ()
-                    # change to goals computed
-                    index1 = indices[1]
-                    goal_ids = all_goal_ids[index1]
-                    # print(index1)
-                    label = np.array(data[self.pose_name])[goal_ids]
-                    # print(type(label))
-                    # for items in list(data['all_tf2_frames_from_base_link_vec_quat_xyzxyzw_json'][indices]):
-                    #     json_data = json.loads(items.decode('UTF-8'))
-                    #     label = label + tuple([json_data['gripper_center']])
-                    #     print(np.array(json_data['gripper_center']))
-                    #     print(json_data.keys())
-                    #     y.append(np.array(json_data['camera_rgb_frame']))
-                    if('stacking_reward' in self.label_features_to_extract):
-                        # print(y)
-                        y.append(current_stacking_reward)
-                    else:
-                        y.append(label)
-                    if 'success' in example_filename:
-                        action_successes = action_successes + [1]
-                    else:
-                        action_successes = action_successes + [0]
-                    # print("y = ", y)
+                        # Store class
+                        label = ()
+                        # change to goals computed
+                        index1 = indices[1]
+                        goal_ids = all_goal_ids[index1]
+                        # print(index1)
+                        label = np.array(data[self.pose_name])[goal_ids]
+                        # print(type(label))
+                        # for items in list(data['all_tf2_frames_from_base_link_vec_quat_xyzxyzw_json'][indices]):
+                        #     json_data = json.loads(items.decode('UTF-8'))
+                        #     label = label + tuple([json_data['gripper_center']])
+                        #     print(np.array(json_data['gripper_center']))
+                        #     print(json_data.keys())
+                        #     y.append(np.array(json_data['camera_rgb_frame']))
+                        if('stacking_reward' in self.label_features_to_extract):
+                            # print(y)
+                            y.append(current_stacking_reward)
+                        else:
+                            y.append(label)
+                        if 'success' in example_filename:
+                            action_successes = action_successes + [1]
+                        else:
+                            action_successes = action_successes + [0]
+                        # print("y = ", y)
             except IOError as ex:
                 print('Error: Skipping file due to IO error when opening ' + example_filename + ': ' + str(ex))
+            # If features to extract is image_m_image_n then return batch (two images and label which is the interval)           
+            if (self.data_features_to_extract is not None and 'image_m_image_n' in self.data_features_to_extract):
+                if self.visualize_embeddings:
+                    normalized_frame = preprocess_numpy_input(np.array(rgb_images_resized[0], dtype=np.double))
+                    return (normalized_frame, 0, 0)
+                # TODO(adit98) modify this to use cmd line arg
+                #print(np.concatenate(rgb_images_resized[:4]).shape)
+                normalized_frames = encode_action_and_images(data_features_to_extract='image_m_image_n',
+                                    poses=None, action_labels=None,
+                                    init_images=np.concatenate(rgb_images_resized[:1]),
+                                    current_images=np.concatenate(rgb_images_resized[1:]))
+                return normalized_frames[0], normalized_frames[1], interval
+                #normalized_frames = encode_action_and_images(data_features_to_extract='image_m_image_n',
+                #                    poses=None, action_labels=None,
+                #                    init_images=rgb_images_resized[:1], current_images=rgb_images_resized[1:])
+                #return normalized_frames[0], normalized_frames[1], torch.ones(1) * interval
+
+            if (self.data_features_to_extract is not None and 'image_n_vec_xyz_aaxyz_nsc_q_dq_gripper' in self.data_features_to_extract):
+                [normalized_frame, joint_encoded] = encode_action_and_images(data_features_to_extract='image_n_vec_xyz_aaxyz_nsc_q_dq_gripper',
+                                                    poses=joints, action_labels=None,
+                                                    init_images=np.concatenate(rgb_images_resized[:1]), current_images=None)
+                return (normalized_frame, joint_encoded, interval)
+
+            if self.data_features_to_extract is not None and 'image_m_vec_m_image_n_vec_n' in self.data_features_to_extract:
+                if self.visualize_embeddings:
+                    img, vec = encode_action_and_images(data_features_to_extract='image_m_vec_m_image_n_vec_n',
+                                    poses=joints, action_labels=None,
+                                    init_images=rgb_images_resized[0],
+                                    current_images=None)
+                    return img, vec, 0
+                # TODO(adit98) modify this to use cmd line arg
+                normalized_frames, joints = encode_action_and_images(data_features_to_extract='image_m_vec_m_image_n_vec_n',
+                                    poses=joints, action_labels=None,
+                                    init_images=np.concatenate(rgb_images_resized[:1]),
+                                    current_images=np.concatenate(rgb_images_resized[1:]))
+                return normalized_frames[0], normalized_frames[1], joints[0], joints[1], interval
 
             action_labels = np.array(action_labels)
             # note: we disabled keras format of numpy arrays
@@ -1029,7 +1312,7 @@ class CostarBlockStackingDataset(Dataset):
             # TODO(ahundt) make sure this doen't happen wrong, see dataset reader collate and prefetch
             current_images = np.array(current_images, dtype=np.float32)
             current_images = np.moveaxis(current_images, 3, 1)  # Switch to channel-first format as per torch convention
-
+        
             # encoded_goal_pose = None
             # print('encoded poses shape: ' + str(encoded_poses.shape))
             # print('action labels shape: ' + str(action_labels.shape))

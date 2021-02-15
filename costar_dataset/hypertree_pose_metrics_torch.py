@@ -886,7 +886,6 @@ def batch_encode_xyz_qxyzw_to_xyz_aaxyz_nsc(batch_xyz_qxyzw, rescale_meters=4, r
         encoded_poses.append(xyz_aaxyz_nsc)
     return np.stack(encoded_poses, axis=0)
 
-
 def decode_xyz_aaxyz_nsc_to_xyz_qxyzw(xyz_aaxyz_nsc, rescale_meters=4, rotation_weight=0.001):
     """ Encode a translation + quaternion pose to an encoded xyz, axis, and an angle as sin(theta) cos(theta)
 
